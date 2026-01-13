@@ -1,0 +1,21 @@
+import { render, screen } from '@testing-library/react';
+import App from './App';
+
+test('renders app', () => {
+  render(<App />);
+  // Basic test to ensure app renders
+  expect(document.body).toBeInTheDocument();
+});
+
+
+
+
+
+
+
+
+
+
+
+
+
