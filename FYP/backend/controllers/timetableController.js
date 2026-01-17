@@ -90,8 +90,10 @@ exports.getTimetable = async (req, res) => {
       query.day = day;
     }
 
-    // If student, get their registered courses' timetables
-    if (studentId || (req.user && req.user.role === 'student')) {
+    // If student and filterMyCourses is true, get their registered courses' timetables only
+    // Otherwise, show all courses (filterMyCourses defaults to false)
+    const filterMyCourses = req.query.filterMyCourses === 'true';
+    if (filterMyCourses && (studentId || (req.user && req.user.role === 'student'))) {
       const student = studentId || req.user.id;
       const registrations = await Registration.find({
         studentId: student,
@@ -99,7 +101,16 @@ exports.getTimetable = async (req, res) => {
       });
 
       const courseIds = registrations.map(reg => reg.courseId);
-      query.courseId = { $in: courseIds };
+      if (courseIds.length > 0) {
+        query.courseId = { $in: courseIds };
+      } else {
+        // If no registered courses, return empty result
+        return res.json({
+          success: true,
+          count: 0,
+          timetables: []
+        });
+      }
     }
 
     const timetables = await Timetable.find(query)

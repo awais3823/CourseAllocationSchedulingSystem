@@ -14,10 +14,17 @@ const AdminStatistics = () => {
   const loadStatistics = async () => {
     try {
       setLoading(true);
+      setError('');
       const response = await api.get('/statistics');
-      setStats(response.data.statistics);
+      if (response.data.success && response.data.statistics) {
+        setStats(response.data.statistics);
+      } else {
+        setError('Invalid response from server');
+      }
     } catch (error) {
-      setError('Failed to load statistics');
+      const errorMessage = error.response?.data?.message || error.message || 'Failed to load statistics';
+      setError(errorMessage);
+      console.error('Statistics loading error:', error);
     } finally {
       setLoading(false);
     }
@@ -27,12 +34,28 @@ const AdminStatistics = () => {
     return <div className="loading"><div className="spinner"></div></div>;
   }
 
-  if (error) {
-    return <div className="alert alert-error">{error}</div>;
+  if (error && !loading) {
+    return (
+      <div className="page-container">
+        <div className="page-header">
+          <h1>Admin Dashboard Statistics</h1>
+          <button onClick={loadStatistics} className="btn btn-secondary">Retry</button>
+        </div>
+        <div className="alert alert-error">{error}</div>
+      </div>
+    );
   }
 
-  if (!stats) {
-    return <div className="no-data">No statistics available</div>;
+  if (!stats && !loading) {
+    return (
+      <div className="page-container">
+        <div className="page-header">
+          <h1>Admin Dashboard Statistics</h1>
+          <button onClick={loadStatistics} className="btn btn-secondary">Refresh</button>
+        </div>
+        <div className="no-data">No statistics available</div>
+      </div>
+    );
   }
 
   return (
@@ -48,22 +71,22 @@ const AdminStatistics = () => {
         <div className="stats-grid">
           <div className="stat-card">
             <div className="stat-icon">👥</div>
-            <div className="stat-value">{stats.users.totalStudents}</div>
+            <div className="stat-value">{stats.users?.totalStudents || 0}</div>
             <div className="stat-label">Total Students</div>
           </div>
           <div className="stat-card">
             <div className="stat-icon">👨‍🏫</div>
-            <div className="stat-value">{stats.users.totalTeachers}</div>
+            <div className="stat-value">{stats.users?.totalTeachers || 0}</div>
             <div className="stat-label">Total Teachers</div>
           </div>
           <div className="stat-card">
             <div className="stat-icon">👤</div>
-            <div className="stat-value">{stats.users.totalAdmins}</div>
+            <div className="stat-value">{stats.users?.totalAdmins || 0}</div>
             <div className="stat-label">Total Admins</div>
           </div>
           <div className="stat-card">
             <div className="stat-icon">⏳</div>
-            <div className="stat-value">{stats.users.pendingUsers}</div>
+            <div className="stat-value">{stats.users?.pendingUsers || 0}</div>
             <div className="stat-label">Pending Users</div>
           </div>
         </div>
@@ -75,22 +98,22 @@ const AdminStatistics = () => {
         <div className="stats-grid">
           <div className="stat-card">
             <div className="stat-icon">📚</div>
-            <div className="stat-value">{stats.courses.totalCourses}</div>
+            <div className="stat-value">{stats.courses?.totalCourses || 0}</div>
             <div className="stat-label">Total Courses</div>
           </div>
           <div className="stat-card">
             <div className="stat-icon">🔴</div>
-            <div className="stat-value">{stats.courses.fullCourses}</div>
+            <div className="stat-value">{stats.courses?.fullCourses || 0}</div>
             <div className="stat-label">Full Courses</div>
           </div>
           <div className="stat-card">
             <div className="stat-icon">🟡</div>
-            <div className="stat-value">{stats.courses.nearlyFullCourses}</div>
+            <div className="stat-value">{stats.courses?.nearlyFullCourses || 0}</div>
             <div className="stat-label">Nearly Full (80%+)</div>
           </div>
         </div>
 
-        {stats.courses.coursesBySemester && stats.courses.coursesBySemester.length > 0 && (
+        {stats.courses?.coursesBySemester && stats.courses.coursesBySemester.length > 0 && (
           <div className="card" style={{ marginTop: '20px' }}>
             <h3>Courses by Semester</h3>
             <div className="table-container">
@@ -114,7 +137,7 @@ const AdminStatistics = () => {
           </div>
         )}
 
-        {stats.courses.capacityStats && stats.courses.capacityStats.length > 0 && (
+        {stats.courses?.capacityStats && stats.courses.capacityStats.length > 0 && (
           <div className="card" style={{ marginTop: '20px' }}>
             <h3>Top Courses by Capacity Utilization</h3>
             <div className="table-container">
@@ -170,22 +193,22 @@ const AdminStatistics = () => {
         <div className="stats-grid">
           <div className="stat-card">
             <div className="stat-icon">✅</div>
-            <div className="stat-value">{stats.registrations.totalRegistrations}</div>
+            <div className="stat-value">{stats.registrations?.totalRegistrations || 0}</div>
             <div className="stat-label">Active Registrations</div>
           </div>
           <div className="stat-card">
             <div className="stat-icon">❌</div>
-            <div className="stat-value">{stats.registrations.droppedRegistrations}</div>
+            <div className="stat-value">{stats.registrations?.droppedRegistrations || 0}</div>
             <div className="stat-label">Dropped Courses</div>
           </div>
           <div className="stat-card">
             <div className="stat-icon">📈</div>
-            <div className="stat-value">{stats.registrations.recentRegistrations}</div>
+            <div className="stat-value">{stats.registrations?.recentRegistrations || 0}</div>
             <div className="stat-label">New (Last 7 Days)</div>
           </div>
           <div className="stat-card">
             <div className="stat-icon">📉</div>
-            <div className="stat-value">{stats.registrations.recentDrops}</div>
+            <div className="stat-value">{stats.registrations?.recentDrops || 0}</div>
             <div className="stat-label">Drops (Last 7 Days)</div>
           </div>
         </div>
@@ -197,12 +220,12 @@ const AdminStatistics = () => {
         <div className="stats-grid">
           <div className="stat-card">
             <div className="stat-icon">📅</div>
-            <div className="stat-value">{stats.timetable.totalEntries}</div>
+            <div className="stat-value">{stats.timetable?.totalEntries || 0}</div>
             <div className="stat-label">Total Timetable Entries</div>
           </div>
         </div>
 
-        {stats.timetable.byDay && stats.timetable.byDay.length > 0 && (
+        {stats.timetable?.byDay && stats.timetable.byDay.length > 0 && (
           <div className="card" style={{ marginTop: '20px' }}>
             <h3>Timetable Entries by Day</h3>
             <div className="table-container">
@@ -233,12 +256,12 @@ const AdminStatistics = () => {
         <div className="stats-grid">
           <div className="stat-card">
             <div className="stat-icon">📋</div>
-            <div className="stat-value">{stats.allocations.totalAllocations}</div>
+            <div className="stat-value">{stats.allocations?.totalAllocations || 0}</div>
             <div className="stat-label">Total Allocations</div>
           </div>
         </div>
 
-        {stats.allocations.topTeachers && stats.allocations.topTeachers.length > 0 && (
+        {stats.allocations?.topTeachers && stats.allocations.topTeachers.length > 0 && (
           <div className="card" style={{ marginTop: '20px' }}>
             <h3>Top Teachers by Course Allocation</h3>
             <div className="table-container">
@@ -269,12 +292,12 @@ const AdminStatistics = () => {
         <div className="stats-grid">
           <div className="stat-card">
             <div className="stat-icon">🏫</div>
-            <div className="stat-value">{stats.classrooms.totalClassrooms}</div>
+            <div className="stat-value">{stats.classrooms?.totalClassrooms || 0}</div>
             <div className="stat-label">Total Classrooms</div>
           </div>
           <div className="stat-card">
             <div className="stat-icon">💺</div>
-            <div className="stat-value">{stats.classrooms.totalCapacity}</div>
+            <div className="stat-value">{stats.classrooms?.totalCapacity || 0}</div>
             <div className="stat-label">Total Capacity</div>
           </div>
         </div>

@@ -96,6 +96,7 @@ const Signup = () => {
       setLoading(false);
       // Wait 2 seconds to show success message before redirecting
       setTimeout(() => {
+        // All roles use the same /dashboard route, but Dashboard component shows role-specific content
         navigate('/dashboard');
       }, 2000);
     } else {

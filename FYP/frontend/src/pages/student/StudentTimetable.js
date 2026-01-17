@@ -9,22 +9,42 @@ const StudentTimetable = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [conflicts, setConflicts] = useState([]);
+  const [filterMyCourses, setFilterMyCourses] = useState(false);
+  const [registeredCourseIds, setRegisteredCourseIds] = useState([]);
 
   useEffect(() => {
+    loadRegisteredCourses();
     loadTimetable();
-  }, []);
+  }, [filterMyCourses]);
 
   useEffect(() => {
     detectConflicts();
   }, [timetable]);
+
+  const loadRegisteredCourses = async () => {
+    try {
+      const response = await api.get('/registrations');
+      if (response.data.success) {
+        const courseIds = (response.data.registrations || []).map(reg => 
+          reg.courseId?._id || reg.courseId
+        );
+        setRegisteredCourseIds(courseIds);
+      }
+    } catch (error) {
+      console.error('Failed to load registered courses:', error);
+    }
+  };
 
   const loadTimetable = async () => {
     try {
       setLoading(true);
       setError('');
       
-      // Load all timetables for all semesters - no filters
-      const response = await api.get('/timetable');
+      // Load timetables - filter by registered courses if filterMyCourses is true
+      const url = filterMyCourses 
+        ? '/timetable?filterMyCourses=true'
+        : '/timetable';
+      const response = await api.get(url);
       
       console.log('Timetable API Response:', response.data);
       
@@ -130,14 +150,24 @@ const StudentTimetable = () => {
 
   const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
   
-  // Format time range for display: "9:00 to 10:30"
+  // Format time range for display: "9:00-10:30" (more compact)
   const formatTimeRange = (startTime, endTime) => {
     const formatSingleTime = (time) => {
       const [hours, minutes] = time.split(':');
       const hour = parseInt(hours, 10);
       return `${hour}:${minutes}`;
     };
-    return `${formatSingleTime(startTime)} to ${formatSingleTime(endTime)}`;
+    return `${formatSingleTime(startTime)}-${formatSingleTime(endTime)}`;
+  };
+  
+  // Format time range for header: "9:00 TO 10:30"
+  const formatTimeRangeHeader = (startTime, endTime) => {
+    const formatSingleTime = (time) => {
+      const [hours, minutes] = time.split(':');
+      const hour = parseInt(hours, 10);
+      return `${hour}:${minutes}`;
+    };
+    return `${formatSingleTime(startTime)} TO ${formatSingleTime(endTime)}`;
   };
 
   // Extract unique time ranges from timetable entries
@@ -186,31 +216,46 @@ const StudentTimetable = () => {
     );
   };
 
+  const isRegisteredCourse = (entry) => {
+    if (!entry.courseId) return false;
+    const courseId = entry.courseId._id || entry.courseId;
+    return registeredCourseIds.some(id => 
+      id?.toString() === courseId?.toString()
+    );
+  };
+
   if (loading) {
     return <div className="loading"><div className="spinner"></div></div>;
   }
 
   return (
-    <div className="page-container">
-      <h1>Timetable</h1>
+    <div className="page-container" style={{ padding: '15px' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+        <h1 style={{ fontSize: '1.5rem', margin: 0 }}>Timetable</h1>
+        <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
+          <input
+            type="checkbox"
+            checked={filterMyCourses}
+            onChange={(e) => setFilterMyCourses(e.target.checked)}
+            style={{ width: '16px', height: '16px', cursor: 'pointer' }}
+          />
+          <span style={{ fontSize: '12px', fontWeight: '500' }}>Show only my courses</span>
+        </label>
+      </div>
+      
+      {!filterMyCourses && registeredCourseIds.length > 0 && (
+        <div className="alert alert-info" style={{ marginBottom: '10px', fontSize: '11px', padding: '8px' }}>
+          <strong>💡 Tip:</strong> Your registered courses have <span style={{ border: '2px solid #dc3545', padding: '1px 4px', borderRadius: '2px', fontWeight: 'bold', backgroundColor: 'white' }}>red borders</span>.
+        </div>
+      )}
       
       {error && (
-        <div className="alert alert-error">{error}</div>
+        <div className="alert alert-error" style={{ marginBottom: '10px', padding: '8px', fontSize: '12px' }}>{error}</div>
       )}
       
       {conflicts.length > 0 && (
-        <div className="alert alert-warning" style={{ marginBottom: '20px' }}>
-          <strong>⚠️ Schedule Conflicts Detected:</strong>
-          <ul style={{ marginTop: '10px', marginBottom: 0 }}>
-            {conflicts.map((conflict, idx) => (
-              <li key={idx}>
-                <strong>{conflict.course1}</strong> ({conflict.time1}) conflicts with <strong>{conflict.course2}</strong> ({conflict.time2}) on {conflict.day}
-              </li>
-            ))}
-          </ul>
-          <p style={{ marginTop: '10px', marginBottom: 0, fontSize: '14px' }}>
-            Please contact the administrator to resolve these conflicts.
-          </p>
+        <div className="alert alert-warning" style={{ marginBottom: '10px', padding: '8px', fontSize: '11px' }}>
+          <strong>⚠️ Conflicts:</strong> {conflicts.length} conflict(s) detected. Contact administrator.
         </div>
       )}
       
@@ -223,8 +268,8 @@ const StudentTimetable = () => {
               <tr>
                 <th className="day-cell">Day</th>
                 {timeRanges.map((timeRange, index) => (
-                  <th key={`${timeRange.startTime}-${timeRange.endTime}`} className="time-header" title={formatTimeRange(timeRange.startTime, timeRange.endTime)}>
-                    {formatTimeRange(timeRange.startTime, timeRange.endTime)}
+                  <th key={`${timeRange.startTime}-${timeRange.endTime}`} className="time-header" title={formatTimeRangeHeader(timeRange.startTime, timeRange.endTime)}>
+                    {formatTimeRangeHeader(timeRange.startTime, timeRange.endTime)}
                   </th>
                 ))}
               </tr>
@@ -241,26 +286,34 @@ const StudentTimetable = () => {
                           <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
                             {entries.map((entry, idx) => {
                               const hasConflictForEntry = hasConflict(entry);
+                              const isRegistered = isRegisteredCourse(entry);
+                              const courseName = entry.courseId?.courseName || 'N/A';
+                              const truncatedName = courseName.length > 12 
+                                ? courseName.substring(0, 12) + '...' 
+                                : courseName;
+                              
                               return (
                                 <div 
                                   key={idx}
-                                  className={`timetable-entry ${hasConflictForEntry ? 'conflict' : ''}`} 
-                                  title={`${entry.courseId?.courseCode || 'N/A'} - ${entry.courseId?.courseName || 'N/A'} | ${entry.teacherId?.name || 'N/A'} | ${entry.classId?.className || 'N/A'} | ${formatTimeRange(entry.startTime, entry.endTime)}`}
-                                  style={{ marginBottom: entries.length > 1 ? '2px' : '0' }}
+                                  className={`timetable-entry ${isRegistered ? 'registered-course' : ''} ${hasConflictForEntry ? 'has-conflict' : ''}`}
+                                  title={`${entry.courseId?.courseCode || 'N/A'} - ${entry.courseId?.courseName || 'N/A'} | ${entry.teacherId?.name || 'N/A'} | ${entry.classId?.className || 'N/A'} | ${formatTimeRange(entry.startTime, entry.endTime)}${isRegistered ? ' (Your Course)' : ''}`}
+                                  style={{ 
+                                    marginBottom: entries.length > 1 ? '4px' : '0'
+                                  }}
                                 >
-                                  {hasConflictForEntry && <span className="conflict-badge" style={{ fontSize: '8px' }}>⚠️</span>}
-                                  <strong>{entry.courseId?.courseCode || 'N/A'}</strong>
-                                  <small style={{ fontSize: '7px', color: '#888' }}>
+                                  <div className="timetable-entry-header">
+                                    <span className="warning-icon" title={hasConflictForEntry ? "Schedule conflict detected" : "Course information"}>⚠️</span>
+                                    <strong className="course-code">{entry.courseId?.courseCode || 'N/A'}</strong>
+                                  </div>
+                                  <div className="timetable-entry-time">
                                     {formatTimeRange(entry.startTime, entry.endTime)}
-                                  </small>
-                                  <small style={{ color: '#666', fontSize: '7px', maxWidth: '100%' }}>
-                                    {entry.courseId?.courseName && entry.courseId.courseName.length > 12 
-                                      ? entry.courseId.courseName.substring(0, 12) + '...' 
-                                      : (entry.courseId?.courseName || 'N/A')}
-                                  </small>
-                                  <small style={{ fontSize: '7px', color: '#999', fontWeight: '500' }}>
+                                  </div>
+                                  <div className="timetable-entry-title">
+                                    {truncatedName}
+                                  </div>
+                                  <div className="timetable-entry-instructor">
                                     {entry.teacherId?.name || 'N/A'}
-                                  </small>
+                                  </div>
                                 </div>
                               );
                             })}

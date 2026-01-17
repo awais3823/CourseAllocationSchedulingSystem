@@ -25,6 +25,8 @@ app.use('/api/registrations', require('./routes/registrations'));
 app.use('/api/allocations', require('./routes/allocations'));
 app.use('/api/classes', require('./routes/classes'));
 app.use('/api/timetable', require('./routes/timetable'));
+app.use('/api/users', require('./routes/users'));
+app.use('/api/statistics', require('./routes/statistics'));
 
 // Health check
 app.get('/api/health', (req, res) => {

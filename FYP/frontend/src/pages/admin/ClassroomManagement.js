@@ -133,19 +133,35 @@ const ClassroomManagement = () => {
       <div className="classes-grid">
         {classes.map(classRoom => (
           <div key={classRoom._id} className="class-card">
-            <h3>{classRoom.className}</h3>
-            <p><strong>Capacity:</strong> {classRoom.capacity}</p>
-            {classRoom.location && <p><strong>Location:</strong> {classRoom.location}</p>}
-            {classRoom.facilities && classRoom.facilities.length > 0 && (
-              <p><strong>Facilities:</strong> {classRoom.facilities.join(', ')}</p>
-            )}
-            <button
-              onClick={() => handleDelete(classRoom._id)}
-              className="btn btn-danger btn-sm"
-              style={{ marginTop: '10px' }}
-            >
-              Remove
-            </button>
+            <div className="class-card-header">
+              <h3 className="classroom-id">{classRoom.className}</h3>
+            </div>
+            <div className="class-card-body">
+              <div className="class-detail">
+                <span className="class-label">Capacity:</span>
+                <span className="class-value">{classRoom.capacity}</span>
+              </div>
+              {classRoom.location && (
+                <div className="class-detail">
+                  <span className="class-label">Location:</span>
+                  <span className="class-value">{classRoom.location}</span>
+                </div>
+              )}
+              {classRoom.facilities && classRoom.facilities.length > 0 && (
+                <div className="class-detail">
+                  <span className="class-label">Facilities:</span>
+                  <span className="class-value">{classRoom.facilities.join(', ')}</span>
+                </div>
+              )}
+            </div>
+            <div className="class-card-footer">
+              <button
+                onClick={() => handleDelete(classRoom._id)}
+                className="btn btn-danger btn-sm delete-btn"
+              >
+                Remove
+              </button>
+            </div>
           </div>
         ))}
       </div>

@@ -1,4 +1,5 @@
 const Course = require('../models/Course');
+const Allocation = require('../models/Allocation');
 
 // @desc    Get all courses
 // @route   GET /api/courses
@@ -26,10 +27,32 @@ exports.getCourses = async (req, res) => {
 
     const courses = await Course.find(query).sort({ courseCode: 1 });
 
+    // Get teacher information for each course from allocations
+    const coursesWithTeachers = await Promise.all(
+      courses.map(async (course) => {
+        const allocation = await Allocation.findOne({
+          courseId: course._id,
+          status: 'allocated'
+        }).populate('teacherId', 'name email');
+
+        const courseObj = course.toObject();
+        if (allocation && allocation.teacherId) {
+          courseObj.teacherId = {
+            _id: allocation.teacherId._id,
+            name: allocation.teacherId.name,
+            email: allocation.teacherId.email
+          };
+        } else {
+          courseObj.teacherId = null;
+        }
+        return courseObj;
+      })
+    );
+
     res.json({
       success: true,
-      count: courses.length,
-      courses
+      count: coursesWithTeachers.length,
+      courses: coursesWithTeachers
     });
   } catch (error) {
     res.status(500).json({

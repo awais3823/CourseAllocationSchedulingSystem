@@ -1,4 +1,5 @@
 const User = require('../models/User');
+const PendingUser = require('../models/PendingUser');
 const generateToken = require('../utils/generateToken');
 const { validationResult } = require('express-validator');
 
@@ -15,9 +16,9 @@ exports.register = async (req, res) => {
       });
     }
 
-    const { registrationNo, email, password, name, role, semester, program } = req.body;
+    const { registrationNo, email, password, name, role, semester, program, degreeLevel } = req.body;
 
-    // Check if user already exists
+    // Check if user already exists in User collection
     const existingUser = await User.findOne({
       $or: [{ email }, { registrationNo }]
     });
@@ -29,15 +30,84 @@ exports.register = async (req, res) => {
       });
     }
 
-    // Create user
+    // Check if email exists in PendingUser collection (added by admin)
+    const pendingUser = await PendingUser.findOne({
+      email: email.toLowerCase().trim()
+    });
+
+    if (!pendingUser) {
+      return res.status(403).json({
+        success: false,
+        message: 'Email not found in system. Please contact admin to add your email first.'
+      });
+    }
+
+    // Verify registration number matches
+    if (pendingUser.registrationNo.trim() !== registrationNo.trim()) {
+      return res.status(400).json({
+        success: false,
+        message: 'Registration number does not match the email on record'
+      });
+    }
+
+    // Get role from PendingUser (admin-assigned role)
+    const assignedRole = pendingUser.role.toLowerCase();
+
+    // If role is provided in request, verify it matches the assigned role
+    if (role && role.toLowerCase() !== assignedRole) {
+      return res.status(400).json({
+        success: false,
+        message: `Role mismatch. Expected role: ${pendingUser.role}`
+      });
+    }
+
+    // Validate student-specific fields if role is student
+    if (assignedRole === 'student') {
+      if (!semester) {
+        return res.status(400).json({
+          success: false,
+          message: 'Semester is required for students'
+        });
+      }
+      if (!program) {
+        return res.status(400).json({
+          success: false,
+          message: 'Program is required for students'
+        });
+      }
+      if (!degreeLevel) {
+        return res.status(400).json({
+          success: false,
+          message: 'Degree level is required for students'
+        });
+      }
+    }
+
+    // Create user with role from PendingUser
     const user = await User.create({
       registrationNo,
       email,
       password,
       name,
-      role,
-      ...(role === 'student' && { semester, program })
+      role: assignedRole, // Use role from PendingUser
+      ...(assignedRole === 'student' && { semester, program, degreeLevel })
     });
+
+    // Remove from PendingUser collection after successful registration
+    try {
+      const deleted = await PendingUser.findOneAndDelete({ 
+        email: email.toLowerCase().trim() 
+      });
+      if (!deleted) {
+        // Fallback: try deleting by registration number if email deletion didn't work
+        await PendingUser.findOneAndDelete({ 
+          registrationNo: registrationNo.trim() 
+        });
+      }
+    } catch (deleteError) {
+      // Log error but don't fail registration if deletion fails
+      console.error('Error deleting pending user:', deleteError);
+    }
 
     const token = generateToken(user._id);
 
@@ -50,7 +120,11 @@ exports.register = async (req, res) => {
         email: user.email,
         name: user.name,
         role: user.role,
-        ...(user.role === 'student' && { semester: user.semester, program: user.program })
+        ...(user.role === 'student' && { 
+          semester: user.semester, 
+          program: user.program,
+          degreeLevel: user.degreeLevel 
+        })
       }
     });
   } catch (error) {

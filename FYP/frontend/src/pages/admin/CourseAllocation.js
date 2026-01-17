@@ -22,16 +22,40 @@ const CourseAllocation = () => {
   const loadData = async () => {
     try {
       setLoading(true);
-      const [allocationsRes, coursesRes, teachersRes] = await Promise.all([
-        api.get('/allocations'),
-        api.get('/courses'),
-        api.get('/auth/users?role=teacher')
+      setError('');
+      
+      // Load allocations and courses
+      const [allocationsRes, coursesRes] = await Promise.all([
+        api.get('/allocations').catch(err => {
+          console.error('Failed to load allocations:', err);
+          return { data: { allocations: [] } };
+        }),
+        api.get('/courses').catch(err => {
+          console.error('Failed to load courses:', err);
+          return { data: { courses: [] } };
+        })
       ]);
-      setAllocations(allocationsRes.data.allocations);
-      setCourses(coursesRes.data.courses);
-      setTeachers(teachersRes.data.users || []);
+      
+      setAllocations(allocationsRes.data.allocations || []);
+      setCourses(coursesRes.data.courses || []);
+      
+      // Try to load teachers (optional - form can work without it)
+      try {
+        const teachersRes = await api.get('/users?role=teacher');
+        setTeachers(teachersRes.data.users || []);
+      } catch (teacherError) {
+        // Teachers endpoint might not exist - that's okay, form has fallback input
+        console.warn('Could not load teachers list:', teacherError);
+        setTeachers([]);
+      }
+      
+      // Show error only if both allocations and courses failed
+      if (!allocationsRes.data.allocations && !coursesRes.data.courses) {
+        setError('Failed to load data');
+      }
     } catch (error) {
-      setError('Failed to load data');
+      console.error('Error loading data:', error);
+      setError(error.response?.data?.message || 'Failed to load data');
     } finally {
       setLoading(false);
     }
