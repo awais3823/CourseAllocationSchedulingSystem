@@ -1,0 +1,19 @@
+services:
+
+  backend:
+    build:
+      context: ./backend
+    container_name: course-allocation-backend
+    env_file:
+      - ./backend/.env.docker
+    ports:
+      - "5000:5000"
+
+  frontend:
+    build:
+      context: ./frontend
+    container_name: course-allocation-frontend
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
