@@ -1,6 +1,4 @@
-const mongoose = require('mongoose');
 const dotenv = require('dotenv');
-const bcrypt = require('bcryptjs');
 const User = require('../models/User');
 const Course = require('../models/Course');
 const Class = require('../models/Class');
@@ -8,40 +6,47 @@ const connectDB = require('../config/database');
 
 dotenv.config();
 
-// Helper function to hash password
-const hashPassword = async (password) => {
-  const salt = await bcrypt.genSalt(10);
-  return await bcrypt.hash(password, salt);
-};
+const hasArg = (name) => process.argv.slice(2).includes(name);
 
 const seedData = async () => {
   try {
     await connectDB();
 
-    // Clear existing data
-    await User.deleteMany({});
-    await Course.deleteMany({});
-    await Class.deleteMany({});
+    const force = hasArg('--force');
 
-    console.log('Cleared existing data...');
+    if (force) {
+      await User.deleteMany({});
+      await Course.deleteMany({});
+      await Class.deleteMany({});
+      console.log('⚠️  Cleared existing data (--force enabled)');
+    } else {
+      console.log('ℹ️  Safe seed mode (no deletes). Use --force to wipe collections.');
+    }
 
-    // Hash passwords first
-    const adminPassword = await hashPassword('admin123');
-    const teacherPassword = await hashPassword('teacher123');
-    const studentPassword = await hashPassword('student123');
+    // IMPORTANT:
+    // Do NOT pre-hash passwords here because `User` model hashes on save.
+    const adminPassword = 'admin123';
+    const teacherPassword = 'teacher123';
+    const studentPassword = 'student123';
 
     // Create Admin
-    const admin = await User.create({
-      registrationNo: 'ADMIN001',
-      email: 'admin@university.edu',
-      password: adminPassword,
-      name: 'System Administrator',
-      role: 'admin'
-    });
-    console.log('Admin created:', admin.email);
+    const adminEmail = 'admin@university.edu';
+    const existingAdmin = await User.findOne({ email: adminEmail });
+    if (!existingAdmin) {
+      const admin = await User.create({
+        registrationNo: 'ADMIN001',
+        email: adminEmail,
+        password: adminPassword,
+        name: 'System Administrator',
+        role: 'admin'
+      });
+      console.log('Admin created:', admin.email);
+    } else {
+      console.log('Admin exists, skipped:', adminEmail);
+    }
 
     // Create Teachers
-    const teachers = await User.insertMany([
+    const teachersData = [
       {
         registrationNo: 'T001',
         email: 'teacher1@university.edu',
@@ -63,11 +68,20 @@ const seedData = async () => {
         name: 'Dr. Michael Brown',
         role: 'teacher'
       }
-    ]);
-    console.log('Teachers created:', teachers.length);
+    ];
+    let teachersCreated = 0;
+    for (const t of teachersData) {
+      const email = t.email.toLowerCase().trim();
+      const reg = t.registrationNo.trim();
+      const exists = await User.findOne({ $or: [{ email }, { registrationNo: reg }] });
+      if (exists) continue;
+      await User.create({ ...t, email, registrationNo: reg });
+      teachersCreated += 1;
+    }
+    console.log('Teachers created:', teachersCreated);
 
     // Create Students
-    const students = await User.insertMany([
+    const studentsData = [
       {
         registrationNo: 'S001',
         email: 'student1@university.edu',
@@ -75,7 +89,8 @@ const seedData = async () => {
         name: 'Alice Williams',
         role: 'student',
         semester: 3,
-        program: 'Computer Science'
+        program: 'Computer Science',
+        degreeLevel: 'BS'
       },
       {
         registrationNo: 'S002',
@@ -84,7 +99,8 @@ const seedData = async () => {
         name: 'Bob Davis',
         role: 'student',
         semester: 3,
-        program: 'Computer Science'
+        program: 'Computer Science',
+        degreeLevel: 'BS'
       },
       {
         registrationNo: 'S003',
@@ -93,13 +109,23 @@ const seedData = async () => {
         name: 'Charlie Miller',
         role: 'student',
         semester: 5,
-        program: 'Software Engineering'
+        program: 'Software Engineering',
+        degreeLevel: 'BS'
       }
-    ]);
-    console.log('Students created:', students.length);
+    ];
+    let studentsCreated = 0;
+    for (const s of studentsData) {
+      const email = s.email.toLowerCase().trim();
+      const reg = s.registrationNo.trim();
+      const exists = await User.findOne({ $or: [{ email }, { registrationNo: reg }] });
+      if (exists) continue;
+      await User.create({ ...s, email, registrationNo: reg });
+      studentsCreated += 1;
+    }
+    console.log('Students created:', studentsCreated);
 
     // Create Courses
-    const courses = await Course.insertMany([
+    const coursesData = [
       {
         courseId: 'CS101',
         courseName: 'Introduction to Programming',
@@ -117,7 +143,6 @@ const seedData = async () => {
         credits: 3,
         semester: 3,
         program: 'Computer Science',
-        prerequisites: ['CS101'],
         maxStudents: 40,
         description: 'Fundamental data structures'
       },
@@ -128,7 +153,6 @@ const seedData = async () => {
         credits: 3,
         semester: 5,
         program: 'Computer Science',
-        prerequisites: ['CS201'],
         maxStudents: 35,
         description: 'Database design and management'
       },
@@ -139,7 +163,6 @@ const seedData = async () => {
         credits: 3,
         semester: 3,
         program: 'Software Engineering',
-        prerequisites: ['CS101'],
         maxStudents: 40,
         description: 'Software development methodologies'
       },
@@ -150,15 +173,21 @@ const seedData = async () => {
         credits: 3,
         semester: 7,
         program: 'Computer Science',
-        prerequisites: ['CS301'],
         maxStudents: 30,
         description: 'Introduction to machine learning'
       }
-    ]);
-    console.log('Courses created:', courses.length);
+    ];
+    let coursesCreated = 0;
+    for (const c of coursesData) {
+      const exists = await Course.findOne({ $or: [{ courseId: c.courseId }, { courseCode: c.courseCode }] });
+      if (exists) continue;
+      await Course.create(c);
+      coursesCreated += 1;
+    }
+    console.log('Courses created:', coursesCreated);
 
     // Create Classrooms
-    const classes = await Class.insertMany([
+    const classesData = [
       {
         className: 'A101',
         capacity: 50,
@@ -189,14 +218,24 @@ const seedData = async () => {
         location: 'Building C, Third Floor',
         facilities: ['Projector', 'Whiteboard', 'WiFi', 'Sound System']
       }
-    ]);
-    console.log('Classrooms created:', classes.length);
+    ];
+    let classesCreated = 0;
+    for (const cl of classesData) {
+      const exists = await Class.findOne({ className: cl.className });
+      if (exists) continue;
+      await Class.create(cl);
+      classesCreated += 1;
+    }
+    console.log('Classrooms created:', classesCreated);
 
-    console.log('\n✅ Seed data created successfully!');
+    console.log('\n✅ Seed completed successfully!');
     console.log('\nLogin credentials:');
     console.log('Admin: admin@university.edu / admin123');
     console.log('Teacher: teacher1@university.edu / teacher123');
     console.log('Student: student1@university.edu / student123');
+    console.log('\nUsage:');
+    console.log('  node scripts/seedData.js        # safe mode (no deletes)');
+    console.log('  node scripts/seedData.js --force  # wipe collections, then seed');
 
     process.exit(0);
   } catch (error) {

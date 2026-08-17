@@ -1,16 +1,18 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import api from '../../services/api';
 import './AdminPages.css';
 
 const CourseManagement = () => {
   const [courses, setCourses] = useState([]);
+  const [programs, setPrograms] = useState([]);
+  const [selectedProgram, setSelectedProgram] = useState('All');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [showForm, setShowForm] = useState(false);
   const [editingCourse, setEditingCourse] = useState(null);
+  const [collapsedSemesters, setCollapsedSemesters] = useState(() => new Set());
   const [formData, setFormData] = useState({
-    courseId: '',
     courseCode: '',
     courseName: '',
     credits: '',
@@ -24,32 +26,108 @@ const CourseManagement = () => {
     registrationEndDate: ''
   });
 
-  useEffect(() => {
-    loadCourses();
+  const prerequisiteCandidates = useMemo(() => {
+    const sem = Number.parseInt(formData.semester, 10);
+    const program = (formData.program || '').toString().trim().toLowerCase();
+    return (courses || [])
+      .filter((c) => c?._id)
+      .filter((c) => {
+        if (!program) return true;
+        return (c.program || '').toString().trim().toLowerCase() === program;
+      })
+      .filter((c) => {
+        const cSem = typeof c.semester === 'number' ? c.semester : Number.parseInt(c.semester, 10);
+        if (!Number.isFinite(sem)) return true;
+        return Number.isFinite(cSem) ? cSem < sem : true;
+      })
+      .sort((a, b) => (a.courseCode || '').localeCompare(b.courseCode || ''));
+  }, [courses, formData.program, formData.semester]);
+
+  const prerequisiteIdSet = useMemo(() => {
+    const ids = Array.isArray(formData.prerequisites) ? formData.prerequisites : [];
+    return new Set(ids.map((x) => (x?._id ? x._id.toString() : x?.toString())));
+  }, [formData.prerequisites]);
+
+  const loadPrograms = useCallback(async () => {
+    try {
+      const res = await api.get('/courses/programs');
+      setPrograms(res.data.programs || []);
+    } catch (e) {
+      // Non-blocking: program filter can still work as "All"
+      setPrograms([]);
+    }
   }, []);
 
-  const loadCourses = async () => {
+  const getSemesterNumber = (course) => {
+    const raw = course?.semester;
+    const n = typeof raw === 'number' ? raw : parseInt(raw, 10);
+    return Number.isFinite(n) ? n : 0;
+  };
+
+  const getCoursesGroupedBySemester = () => {
+    const groups = new Map();
+    courses.forEach((course) => {
+      const sem = getSemesterNumber(course);
+      if (!groups.has(sem)) groups.set(sem, []);
+      groups.get(sem).push(course);
+    });
+
+    for (const [sem, list] of groups.entries()) {
+      list.sort((a, b) => (a?.courseCode || '').toString().localeCompare((b?.courseCode || '').toString()));
+      groups.set(sem, list);
+    }
+
+    return Array.from(groups.entries()).sort(([a], [b]) => {
+      if (a === 0 && b !== 0) return 1;
+      if (b === 0 && a !== 0) return -1;
+      return a - b;
+    });
+  };
+
+  const toggleSemesterCollapsed = (semester) => {
+    setCollapsedSemesters((prev) => {
+      const next = new Set(prev);
+      if (next.has(semester)) next.delete(semester);
+      else next.add(semester);
+      return next;
+    });
+  };
+
+  const loadCourses = useCallback(async (program = selectedProgram) => {
     try {
       setLoading(true);
-      const response = await api.get('/courses');
+      const params = {};
+      if (program && program !== 'All') params.program = program;
+      const response = await api.get('/courses', { params });
       setCourses(response.data.courses || []);
     } catch (error) {
       setError('Failed to load courses');
     } finally {
       setLoading(false);
     }
-  };
+  }, [selectedProgram]);
+
+  useEffect(() => {
+    loadPrograms();
+    loadCourses('All');
+  }, [loadPrograms, loadCourses]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     try {
       setError('');
       setSuccess('');
+      const toInt = (v) => {
+        if (v === null || v === undefined || v === '') return NaN;
+        const n = typeof v === 'number' ? v : Number.parseInt(v, 10);
+        return Number.isFinite(n) ? n : NaN;
+      };
       const courseData = {
         ...formData,
-        credits: parseInt(formData.credits),
-        semester: parseInt(formData.semester),
-        maxStudents: parseInt(formData.maxStudents),
+        program: (formData.program || '').toString().trim(),
+        credits: toInt(formData.credits),
+        semester: toInt(formData.semester),
+        maxStudents: toInt(formData.maxStudents),
         degreeLevels: Array.isArray(formData.degreeLevels) 
           ? formData.degreeLevels 
           : formData.degreeLevels.split(',').map(d => d.trim()).filter(d => d),
@@ -60,18 +138,38 @@ const CourseManagement = () => {
         registrationEndDate: formData.registrationEndDate ? new Date(formData.registrationEndDate).toISOString() : null
       };
 
+      if (!Number.isFinite(courseData.credits) || courseData.credits <= 0) {
+        setError('Credits must be a valid number.');
+        return;
+      }
+      if (!Number.isFinite(courseData.semester) || courseData.semester <= 0) {
+        setError('Semester must be a valid number.');
+        return;
+      }
+      if (!Number.isFinite(courseData.maxStudents) || courseData.maxStudents <= 0) {
+        setError('Max Students must be a valid number.');
+        return;
+      }
+
       if (editingCourse) {
-        await api.put(`/courses/${editingCourse._id}`, courseData);
-        setSuccess('Course updated successfully');
+        const res = await api.put(`/courses/${editingCourse._id}`, courseData);
+        const updated = res.data?.course;
+        if (updated?._id) {
+          setCourses((prev) => prev.map((c) => (c._id === updated._id ? updated : c)));
+        }
+        setSuccess(`Course updated successfully (Max Students: ${updated?.maxStudents ?? courseData.maxStudents})`);
       } else {
-        await api.post('/courses', courseData);
-        setSuccess('Course added successfully');
+        const res = await api.post('/courses', courseData);
+        const created = res.data?.course;
+        if (created?._id) {
+          setCourses((prev) => [created, ...prev]);
+        }
+        setSuccess(`Course added successfully (Max Students: ${created?.maxStudents ?? courseData.maxStudents})`);
       }
       
       setShowForm(false);
       setEditingCourse(null);
       setFormData({
-        courseId: '',
         courseCode: '',
         courseName: '',
         credits: '',
@@ -84,7 +182,8 @@ const CourseManagement = () => {
         registrationStartDate: '',
         registrationEndDate: ''
       });
-      loadCourses();
+      loadPrograms();
+      loadCourses(selectedProgram);
     } catch (error) {
       setError(error.response?.data?.message || (editingCourse ? 'Failed to update course' : 'Failed to add course'));
     }
@@ -106,7 +205,6 @@ const CourseManagement = () => {
     };
     
     setFormData({
-      courseId: course.courseId || '',
       courseCode: course.courseCode || '',
       courseName: course.courseName || '',
       credits: course.credits || '',
@@ -115,12 +213,13 @@ const CourseManagement = () => {
       degreeLevels: course.degreeLevels || [],
       maxStudents: course.maxStudents || '',
       description: course.description || '',
-      prerequisites: course.prerequisites || [],
+      prerequisites: Array.isArray(course.prerequisites)
+        ? course.prerequisites.map((p) => (p?._id ? p._id : p)).filter(Boolean)
+        : [],
       registrationStartDate: formatDateForInput(course.registrationStartDate),
       registrationEndDate: formatDateForInput(course.registrationEndDate)
     });
     setShowForm(true);
-    window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   const handleDelete = async (id) => {
@@ -143,7 +242,6 @@ const CourseManagement = () => {
     setShowForm(false);
     setEditingCourse(null);
     setFormData({
-      courseId: '',
       courseCode: '',
       courseName: '',
       credits: '',
@@ -163,32 +261,42 @@ const CourseManagement = () => {
   }
 
   return (
-    <div className="page-container">
+    <div className="page-container course-management-page">
       <div className="page-header">
         <h1>Course Management</h1>
-        <button onClick={() => setShowForm(!showForm)} className="btn btn-primary">
-          {showForm ? 'Cancel' : 'Add Course'}
-        </button>
+        <div>
+          <select
+            className="program-filter-select"
+            value={selectedProgram}
+            onChange={(e) => {
+              const next = e.target.value;
+              setSelectedProgram(next);
+              loadCourses(next);
+            }}
+            aria-label="Filter by program"
+          >
+            <option value="All">All Programs</option>
+            {programs.map((p) => (
+              <option key={p} value={p}>{p}</option>
+            ))}
+          </select>
+          <button onClick={() => setShowForm(true)} className="btn btn-primary">
+            Add Course
+          </button>
+        </div>
       </div>
 
       {error && <div className="alert alert-error">{error}</div>}
       {success && <div className="alert alert-success">{success}</div>}
 
       {showForm && (
-        <div className="card">
-          <h2>{editingCourse ? 'Edit Course' : 'Add New Course'}</h2>
-          <form onSubmit={handleSubmit}>
-            <div className="form-group">
-              <label>Course ID</label>
-              <input
-                type="text"
-                value={formData.courseId}
-                onChange={(e) => setFormData({ ...formData, courseId: e.target.value.toUpperCase() })}
-                required
-                placeholder="e.g., CS101"
-                disabled={!!editingCourse}
-              />
+        <div className="gen-modal-overlay" onClick={handleCancel}>
+          <div className="gen-modal" style={{ width: 'min(720px, 96vw)' }} onClick={(e) => e.stopPropagation()}>
+            <div className="gen-modal__header">
+              <h2>{editingCourse ? 'Edit Course' : 'Add New Course'}</h2>
+              <button type="button" className="gen-modal__close" onClick={handleCancel}>✕</button>
             </div>
+          <form onSubmit={handleSubmit}>
             <div className="form-group">
               <label>Course Code</label>
               <input
@@ -216,8 +324,10 @@ const CourseManagement = () => {
                   type="number"
                   min="1"
                   max="6"
+                  step="1"
                   value={formData.credits}
                   onChange={(e) => setFormData({ ...formData, credits: e.target.value })}
+                  onWheel={(e) => e.currentTarget.blur()}
                   required
                 />
               </div>
@@ -226,9 +336,11 @@ const CourseManagement = () => {
                 <input
                   type="number"
                   min="1"
-                  max="8"
+                  max="12"
+                  step="1"
                   value={formData.semester}
                   onChange={(e) => setFormData({ ...formData, semester: e.target.value })}
+                  onWheel={(e) => e.currentTarget.blur()}
                   required
                 />
               </div>
@@ -237,8 +349,10 @@ const CourseManagement = () => {
                 <input
                   type="number"
                   min="1"
+                  step="1"
                   value={formData.maxStudents}
                   onChange={(e) => setFormData({ ...formData, maxStudents: e.target.value })}
+                  onWheel={(e) => e.currentTarget.blur()}
                   required
                 />
               </div>
@@ -247,11 +361,17 @@ const CourseManagement = () => {
               <label>Program</label>
               <input
                 type="text"
+                list="program-options"
                 value={formData.program}
                 onChange={(e) => setFormData({ ...formData, program: e.target.value })}
                 required
-                placeholder="e.g., Computer Science"
+                placeholder="Type program (or pick from suggestions)"
               />
+              <datalist id="program-options">
+                {programs.map((p) => (
+                  <option key={p} value={p} />
+                ))}
+              </datalist>
             </div>
             <div className="form-group">
               <label>Degree Levels (comma-separated: BS, Master, MPhil)</label>
@@ -272,6 +392,79 @@ const CourseManagement = () => {
                 placeholder="Course description (optional)"
               />
             </div>
+
+            <div className="form-group">
+              <label>Prerequisites</label>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: '10px', alignItems: 'end' }}>
+                <select
+                  value=""
+                  onChange={(e) => {
+                    const id = e.target.value;
+                    if (!id) return;
+                    const current = Array.isArray(formData.prerequisites) ? formData.prerequisites : [];
+                    if (prerequisiteIdSet.has(id.toString())) return;
+                    setFormData({ ...formData, prerequisites: [...current, id] });
+                  }}
+                >
+                  <option value="">Select a prerequisite course…</option>
+                  {prerequisiteCandidates.map((c) => (
+                    <option key={c._id} value={c._id}>
+                      {c.courseCode} — {c.courseName} (Sem {c.semester})
+                    </option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => setFormData({ ...formData, prerequisites: [] })}
+                  disabled={!Array.isArray(formData.prerequisites) || formData.prerequisites.length === 0}
+                >
+                  Clear
+                </button>
+              </div>
+
+              {Array.isArray(formData.prerequisites) && formData.prerequisites.length > 0 && (
+                <div style={{ marginTop: '10px', display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                  {formData.prerequisites.map((pid) => {
+                    const id = pid?._id ? pid._id.toString() : pid.toString();
+                    const course = courses.find((c) => c._id?.toString() === id);
+                    const label = course ? `${course.courseCode} — ${course.courseName}` : id;
+                    return (
+                      <span
+                        key={id}
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '8px',
+                          padding: '6px 10px',
+                          borderRadius: '999px',
+                          border: '1px solid #e5e7eb',
+                          background: '#f8fafc',
+                          fontSize: '0.85rem'
+                        }}
+                      >
+                        <strong>{label}</strong>
+                        <button
+                          type="button"
+                          className="btn btn-danger btn-sm"
+                          style={{ padding: '2px 8px' }}
+                          onClick={() => {
+                            const next = formData.prerequisites.filter((x) => (x?._id ? x._id.toString() : x.toString()) !== id);
+                            setFormData({ ...formData, prerequisites: next });
+                          }}
+                        >
+                          Remove
+                        </button>
+                      </span>
+                    );
+                  })}
+                </div>
+              )}
+              <small style={{ color: '#666', fontSize: '12px' }}>
+                Recommended: choose prerequisite courses from earlier semesters of the same program.
+              </small>
+            </div>
+
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '15px' }}>
               <div className="form-group">
                 <label>Registration Start Date & Time</label>
@@ -298,13 +491,12 @@ const CourseManagement = () => {
               <button type="submit" className="btn btn-primary">
                 {editingCourse ? 'Update Course' : 'Add Course'}
               </button>
-              {editingCourse && (
-                <button type="button" onClick={handleCancel} className="btn btn-secondary">
-                  Cancel
-                </button>
-              )}
+              <button type="button" onClick={handleCancel} className="btn btn-secondary">
+                Cancel
+              </button>
             </div>
           </form>
+          </div>
         </div>
       )}
 
@@ -321,33 +513,56 @@ const CourseManagement = () => {
               <th>Actions</th>
             </tr>
           </thead>
-          <tbody>
-            {courses.map(course => (
-              <tr key={course._id}>
-                <td><strong>{course.courseCode}</strong></td>
-                <td>{course.courseName}</td>
-                <td>{course.credits}</td>
-                <td>{course.semester}</td>
-                <td>{course.program}</td>
-                <td>{course.maxStudents}</td>
-                <td>
-                  <button
-                    onClick={() => handleEdit(course)}
-                    className="btn btn-secondary btn-sm"
-                    style={{ marginRight: '5px' }}
-                  >
-                    Edit
-                  </button>
-                  <button
-                    onClick={() => handleDelete(course._id)}
-                    className="btn btn-danger btn-sm"
-                  >
-                    Delete
-                  </button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
+          {getCoursesGroupedBySemester().map(([semester, semesterCourses]) => {
+            const isCollapsed = collapsedSemesters.has(semester);
+            return (
+              <tbody key={`sem-${semester}`}>
+                <tr className="semester-section-row">
+                  <td colSpan={7}>
+                    <button
+                      type="button"
+                      className="semester-section-toggle"
+                      onClick={() => toggleSemesterCollapsed(semester)}
+                    >
+                      <span className="semester-section-title">
+                        {semester === 0 ? 'Other / Unknown Semester' : `Semester ${semester}`}
+                      </span>
+                      <span className="semester-section-meta">
+                        {semesterCourses.length} course(s) <span className="semester-section-caret">{isCollapsed ? '▸' : '▾'}</span>
+                      </span>
+                    </button>
+                  </td>
+                </tr>
+
+                {!isCollapsed &&
+                  semesterCourses.map((course) => (
+                    <tr key={course._id}>
+                      <td><strong>{course.courseCode}</strong></td>
+                      <td>{course.courseName}</td>
+                      <td>{course.credits}</td>
+                      <td>{course.semester}</td>
+                      <td>{course.program}</td>
+                      <td>{course.maxStudents}</td>
+                      <td>
+                        <button
+                          onClick={() => handleEdit(course)}
+                          className="btn btn-secondary btn-sm"
+                          style={{ marginRight: '5px' }}
+                        >
+                          Edit
+                        </button>
+                        <button
+                          onClick={() => handleDelete(course._id)}
+                          className="btn btn-danger btn-sm"
+                        >
+                          Delete
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+              </tbody>
+            );
+          })}
         </table>
       </div>
 

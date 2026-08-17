@@ -16,19 +16,7 @@ exports.register = async (req, res) => {
       });
     }
 
-    const { registrationNo, email, password, name, role, semester, program, degreeLevel } = req.body;
-
-    // Check if user already exists in User collection
-    const existingUser = await User.findOne({
-      $or: [{ email }, { registrationNo }]
-    });
-
-    if (existingUser) {
-      return res.status(400).json({
-        success: false,
-        message: 'User already exists with this email or registration number'
-      });
-    }
+    const { email, password, name, role, semester, program, degreeLevel } = req.body;
 
     // Check if email exists in PendingUser collection (added by admin)
     const pendingUser = await PendingUser.findOne({
@@ -42,11 +30,18 @@ exports.register = async (req, res) => {
       });
     }
 
-    // Verify registration number matches
-    if (pendingUser.registrationNo.trim() !== registrationNo.trim()) {
+    // Use registration number from admin-assigned PendingUser record
+    const registrationNo = pendingUser.registrationNo.trim();
+
+    // Check if user already exists in User collection
+    const existingUser = await User.findOne({
+      $or: [{ email }, { registrationNo }]
+    });
+
+    if (existingUser) {
       return res.status(400).json({
         success: false,
-        message: 'Registration number does not match the email on record'
+        message: 'User already exists with this email or registration number'
       });
     }
 
@@ -149,13 +144,16 @@ exports.login = async (req, res) => {
       });
     }
 
+    // Normalize email to lowercase and trim (matching User schema)
+    const normalizedEmail = email.toLowerCase().trim();
+
     // Find user and include password
-    const user = await User.findOne({ email }).select('+password');
+    const user = await User.findOne({ email: normalizedEmail }).select('+password');
 
     if (!user) {
       return res.status(401).json({
         success: false,
-        message: 'Invalid credentials'
+        message: 'No account found with this email. Please sign up or contact admin to add your email.'
       });
     }
 
@@ -180,13 +178,18 @@ exports.login = async (req, res) => {
         email: user.email,
         name: user.name,
         role: user.role,
-        ...(user.role === 'student' && { semester: user.semester, program: user.program })
+        ...(user.role === 'student' && { 
+          semester: user.semester, 
+          program: user.program,
+          degreeLevel: user.degreeLevel 
+        })
       }
     });
   } catch (error) {
+    console.error('Login error:', error);
     res.status(500).json({
       success: false,
-      message: error.message
+      message: error.message || 'Login failed. Please try again.'
     });
   }
 };

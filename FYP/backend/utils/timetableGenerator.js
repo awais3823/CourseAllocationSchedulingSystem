@@ -3,6 +3,7 @@ const Registration = require('../models/Registration');
 const Allocation = require('../models/Allocation');
 const Course = require('../models/Course');
 const Class = require('../models/Class');
+const User = require('../models/User');
 
 // Helper function to check time overlap
 const timeOverlaps = (start1, end1, start2, end2) => {
@@ -17,6 +18,30 @@ const timeOverlaps = (start1, end1, start2, end2) => {
   const time2End = h4 * 60 + m4;
 
   return (time1Start < time2End && time1End > time2Start);
+};
+
+const toMinutes = (time) => {
+  const [h, m] = time.split(':').map(Number);
+  return h * 60 + m;
+};
+
+const toIdString = (value) => {
+  if (!value) return '';
+  if (typeof value === 'string') return value;
+  if (value._id) return value._id.toString();
+  if (value.toString) return value.toString();
+  return String(value);
+};
+
+// Require at least `breakMinutes` gap between teacher classes.
+// Conflict exists unless one class ends + break before the other starts.
+const violatesTeacherGapRule = (start1, end1, start2, end2, breakMinutes = 10) => {
+  const s1 = toMinutes(start1);
+  const e1 = toMinutes(end1);
+  const s2 = toMinutes(start2);
+  const e2 = toMinutes(end2);
+  const hasRequiredGap = (e1 + breakMinutes <= s2) || (e2 + breakMinutes <= s1);
+  return !hasRequiredGap;
 };
 
 // Helper function to get next day (for consecutive day checking)
@@ -68,7 +93,8 @@ const getTeacherClassesCountOnDay = async (teacherId, day, academicYear, exclude
   return count + batchCount;
 };
 
-// Helper function to check if teacher can have more classes on a day (max 2 per day)
+// Helper function to check if teacher can have more classes on a day.
+// Keep strict limit at 2 classes/day per teacher.
 const canTeacherScheduleOnDay = async (teacherId, day, academicYear, excludeId = null, scheduledInCurrentBatch = []) => {
   const currentCount = await getTeacherClassesCountOnDay(teacherId, day, academicYear, excludeId, scheduledInCurrentBatch);
   return currentCount < 2; // Maximum 2 classes per day
@@ -268,6 +294,17 @@ const checkConflictsSimple = async (courseId, teacherId, classId, day, startTime
     }
   }
 
+  // Preload registration data once (instead of per-overlap entry)
+  const currentRegistrations = await Registration.find({
+    courseId,
+    status: 'registered'
+  }).select('studentId');
+  const currentStudentIds = new Set(currentRegistrations.map((r) => r.studentId.toString()));
+
+  // Cache registrations per other course to avoid repeated DB hits
+  const otherCourseRegistrationCache = new Map();
+  const studentCache = new Map();
+
   // Get all existing timetables for the same day, semester, and academic year
   const existingTimetables = await Timetable.find({
     day,
@@ -275,7 +312,7 @@ const checkConflictsSimple = async (courseId, teacherId, classId, day, startTime
     academicYear,
     status: 'active',
     _id: { $ne: excludeId }
-  }).populate('courseId teacherId classId');
+  }).select('courseId teacherId classId day startTime endTime');
 
   // Also check scheduledInCurrentBatch
   const allTimetables = [...existingTimetables, ...scheduledInCurrentBatch];
@@ -294,7 +331,6 @@ const checkConflictsSimple = async (courseId, teacherId, classId, day, startTime
         conflicts.classroom.push({
           timetableId: existing._id,
           courseId: existing.courseId?._id || existing.courseId,
-          courseName: existing.courseId?.courseName || 'Unknown',
           message: `Classroom already booked for ${day} ${startTime}-${endTime}`
         });
       }
@@ -306,31 +342,12 @@ const checkConflictsSimple = async (courseId, teacherId, classId, day, startTime
       // But cannot have overlapping times (same teacher cannot teach two classes simultaneously)
       const existingTeacherId = existing.teacherId?._id?.toString() || existing.teacherId?.toString() || existing.teacherId;
       if (existingTeacherId && existingTeacherId.toString() === teacherId.toString()) {
-        // First, check if times overlap (excluding consecutive classes)
-        const [h1, m1] = startTime.split(':').map(Number);
-        const [h2, m2] = endTime.split(':').map(Number);
-        const [h3, m3] = existing.startTime.split(':').map(Number);
-        const [h4, m4] = existing.endTime.split(':').map(Number);
-        const time1Start = h1 * 60 + m1;
-        const time1End = h2 * 60 + m2;
-        const time2Start = h3 * 60 + m3;
-        const time2End = h4 * 60 + m4;
-        
-        // Check if times have proper 10-minute break or are overlapping
-        // Classes need a 10-minute break: if one ends at 10:30, next should start at 10:40
-        // Consecutive without break means: time1End == time2Start OR time2End == time1Start (NOT allowed)
-        // Proper break means: time2Start >= time1End + 10 minutes OR time1Start >= time2End + 10 minutes
-        const hasProperBreak = (time2Start >= time1End + 10) || (time1Start >= time2End + 10);
-        const isConsecutiveWithoutBreak = (time1End === time2Start) || (time2End === time1Start);
-        const isOverlapping = (time1Start < time2End && time1End > time2Start);
-        
-        if (isOverlapping || isConsecutiveWithoutBreak) {
-          // Times overlap or don't have proper break - this is a conflict
+        if (violatesTeacherGapRule(startTime, endTime, existing.startTime, existing.endTime, 0)) {
+          // Times overlap or don't have required break.
           conflicts.teacher.push({
             timetableId: existing._id,
             courseId: existing.courseId?._id || existing.courseId,
-            courseName: existing.courseId?.courseName || 'Unknown',
-            message: `Teacher already has a class for ${day} ${existing.startTime}-${existing.endTime}. Classes must have a 10-minute break between them.`
+            message: `Teacher already has an overlapping class for ${day} ${existing.startTime}-${existing.endTime}.`
           });
         }
         // Note: We don't check the 2-class limit here because we're iterating through existing timetables
@@ -340,28 +357,31 @@ const checkConflictsSimple = async (courseId, teacherId, classId, day, startTime
       // Check student conflicts
       const existingCourseId = existing.courseId?._id || existing.courseId;
       if (!existingCourseId) continue; // Skip if no course ID
-      
-      const currentRegistrations = await Registration.find({
-        courseId,
-        status: 'registered'
-      });
 
-      const otherRegistrations = await Registration.find({
-        courseId: existingCourseId,
-        status: 'registered'
-      });
+      const existingCourseKey = existingCourseId.toString();
+      let otherStudentIds = otherCourseRegistrationCache.get(existingCourseKey);
+      if (!otherStudentIds) {
+        const otherRegistrations = await Registration.find({
+          courseId: existingCourseId,
+          status: 'registered'
+        }).select('studentId');
+        otherStudentIds = new Set(otherRegistrations.map((r) => r.studentId.toString()));
+        otherCourseRegistrationCache.set(existingCourseKey, otherStudentIds);
+      }
 
-      const commonStudents = currentRegistrations.filter(cr =>
-        otherRegistrations.some(or => or.studentId.toString() === cr.studentId.toString())
-      );
-
-      for (const commonReg of commonStudents) {
-        const student = await require('../models/User').findById(commonReg.studentId);
+      // Set intersection: students registered in both courses
+      for (const studentId of currentStudentIds) {
+        if (!otherStudentIds.has(studentId)) continue;
+        let student = studentCache.get(studentId);
+        if (!student) {
+          student = await User.findById(studentId).select('name');
+          if (!student) continue;
+          studentCache.set(studentId, student);
+        }
         conflicts.student.push({
-          studentId: student._id,
+          studentId: studentId,
           studentName: student.name,
           conflictingCourseId: existingCourseId,
-          conflictingCourseName: existing.courseId?.courseName || 'Unknown',
           message: `Student ${student.name} has a time conflict between courses`
         });
       }
@@ -433,23 +453,24 @@ const addBreakToTime = (timeStr) => {
   return addMinutesToTime(timeStr, 10);
 };
 
-// Helper function to generate time slots with different durations
-// IMPORTANT: All classes must start at the SAME predefined start times
-// Duration only affects the end time, not the start time
-// This ensures all classes start at fixed, absolute times (e.g., 9:00 or 9:30, not both)
+// Helper function to generate FIXED official slots.
+// If base slot already has explicit start-end (e.g. 09:00-10:30), keep it exactly.
+// This prevents mixed columns like 09:00-10:00 and 09:00-10:30 in UI.
 const generateTimeSlots = (baseTimeSlots, duration) => {
   const slots = [];
   for (const slot of baseTimeSlots) {
     // Handle both formats: '09:00' or '09:00-10:30'
     let startTime;
+    let endTime;
     if (slot.includes('-')) {
-      [startTime] = slot.split('-');
+      [startTime, endTime] = slot.split('-');
+      slots.push({ startTime, endTime, duration: toMinutes(endTime) - toMinutes(startTime) });
+      continue;
     } else {
       startTime = slot;
     }
-    // Calculate end time based on start time + duration
-    // All classes starting at the same time will have the same start time
-    const endTime = addMinutesToTime(startTime, duration);
+    // If only start time is provided, derive end with duration.
+    endTime = addMinutesToTime(startTime, duration);
     slots.push({ startTime, endTime, duration });
   }
   return slots;
@@ -508,8 +529,90 @@ const filterOverlappingSlots = (slots, courseId, day, scheduledSlots, scheduledI
   return filteredSlots;
 };
 
+// Fast in-memory conflict checker used by auto-generation.
+const checkConflictsFast = ({ courseId, teacherId, classId, day, startTime, endTime, scheduledInCurrentBatch, context }) => {
+  const conflicts = {
+    classroom: [],
+    teacher: [],
+    student: [],
+    duplicate: []
+  };
+
+  const courseIdStr = toIdString(courseId);
+  const teacherIdStr = toIdString(teacherId);
+  const classIdStr = toIdString(classId);
+  const courseDayKey = `${courseIdStr}|${day}`;
+
+  const existingForCourseDay = context.existingByCourseDay.get(courseDayKey) || [];
+  for (const existing of existingForCourseDay) {
+    if (timeOverlaps(startTime, endTime, existing.startTime, existing.endTime)) {
+      conflicts.duplicate.push({
+        timetableId: existing._id,
+        message: `This course already has an overlapping class at ${day} ${existing.startTime}-${existing.endTime}.`
+      });
+    }
+  }
+
+  for (const scheduled of scheduledInCurrentBatch) {
+    if (toIdString(scheduled.courseId) !== courseIdStr || scheduled.day !== day) continue;
+    if (timeOverlaps(startTime, endTime, scheduled.startTime, scheduled.endTime)) {
+      conflicts.duplicate.push({
+        message: `This course already has an overlapping class in this generation batch.`
+      });
+    }
+  }
+
+  const dayEntries = context.existingByDay.get(day) || [];
+  const allEntriesForDay = [...dayEntries, ...scheduledInCurrentBatch.filter((s) => s.day === day)];
+
+  const currentCourseStudents = context.registrationSetByCourse.get(courseIdStr) || new Set();
+
+  for (const existing of allEntriesForDay) {
+    if (!existing.startTime || !existing.endTime) continue;
+    if (!timeOverlaps(startTime, endTime, existing.startTime, existing.endTime)) continue;
+
+    if (toIdString(existing.classId) === classIdStr) {
+      conflicts.classroom.push({
+        timetableId: existing._id,
+        courseId: existing.courseId,
+        message: `Classroom already booked for ${day} ${startTime}-${endTime}`
+      });
+    }
+
+    if (toIdString(existing.teacherId) === teacherIdStr &&
+        violatesTeacherGapRule(startTime, endTime, existing.startTime, existing.endTime, 0)) {
+      conflicts.teacher.push({
+        timetableId: existing._id,
+        courseId: existing.courseId,
+        message: `Teacher already has an overlapping class for ${day} ${existing.startTime}-${existing.endTime}.`
+      });
+    }
+
+    const otherCourseIdStr = toIdString(existing.courseId);
+    if (!otherCourseIdStr || otherCourseIdStr === courseIdStr) continue;
+    const otherCourseStudents = context.registrationSetByCourse.get(otherCourseIdStr) || new Set();
+    if (currentCourseStudents.size === 0 || otherCourseStudents.size === 0) continue;
+
+    let hasIntersection = false;
+    for (const studentId of currentCourseStudents) {
+      if (otherCourseStudents.has(studentId)) {
+        hasIntersection = true;
+        break;
+      }
+    }
+    if (hasIntersection) {
+      conflicts.student.push({
+        conflictingCourseId: existing.courseId,
+        message: `Student conflict detected between overlapping courses`
+      });
+    }
+  }
+
+  return conflicts;
+};
+
 // Generate timetable automatically
-const generateTimetable = async (degreeLevel, academicYear, timeSlots, days, priorities = {}) => {
+const generateTimetable = async (degreeLevel, academicYear, timeSlots, days, priorities = {}, semester = null) => {
   // Get all allocations and filter by degree level
   const allocations = await Allocation.find({ status: 'allocated' })
     .populate({
@@ -519,7 +622,15 @@ const generateTimetable = async (degreeLevel, academicYear, timeSlots, days, pri
     .populate('teacherId');
 
   // Filter out allocations where course doesn't match degree level
-  const filteredAllocations = allocations.filter(allocation => allocation.courseId !== null);
+  // Also filter by semester if provided
+  let filteredAllocations = allocations.filter(allocation => allocation.courseId !== null);
+  
+  // Filter by semester if provided
+  if (semester !== null) {
+    filteredAllocations = filteredAllocations.filter(allocation => 
+      allocation.courseId && allocation.courseId.semester === parseInt(semester)
+    );
+  }
 
   if (filteredAllocations.length === 0) {
     console.log(`No allocations found for degree level: ${degreeLevel}`);
@@ -544,13 +655,105 @@ const generateTimetable = async (degreeLevel, academicYear, timeSlots, days, pri
 
   const timetables = [];
   const unresolvedConflicts = [];
-  const avoidConsecutiveDays = priorities.avoidConsecutiveDays !== false; // Default to true
+  const strictTeacherDailyLimit = 2;
+
+  // Preload active timetable entries for this semester/year once.
+  // IMPORTANT: Teacher/day load must be enforced globally across the academic year,
+  // not per-semester. So we preload active entries for the whole year here.
+  const existingSemesterEntries = await Timetable.find({ academicYear, status: 'active' })
+    .select('courseId teacherId classId day startTime endTime')
+    .lean();
+
+  const existingByDay = new Map();
+  const existingByCourseDay = new Map();
+  for (const entry of existingSemesterEntries) {
+    if (!existingByDay.has(entry.day)) existingByDay.set(entry.day, []);
+    existingByDay.get(entry.day).push(entry);
+    const key = `${toIdString(entry.courseId)}|${entry.day}`;
+    if (!existingByCourseDay.has(key)) existingByCourseDay.set(key, []);
+    existingByCourseDay.get(key).push(entry);
+  }
   
   // Track all scheduled entries in this batch to prevent duplicates
   const scheduledInCurrentBatch = [];
+
+  // Preload registrations count per course (removes repeated countDocuments in inner loops)
+  const registrationAgg = await Registration.aggregate([
+    { $match: { status: 'registered' } },
+    { $group: { _id: '$courseId', count: { $sum: 1 } } }
+  ]);
+  const registrationCountByCourse = new Map(
+    registrationAgg.map((row) => [row._id.toString(), row.count])
+  );
+
+  // Preload student registrations for ALL registered courses so student clashes
+  // are checked globally across the generated year (not just current semester batch).
+  const registrationRows = await Registration.find({ status: 'registered' })
+    .select('courseId studentId')
+    .lean();
+  const registrationSetByCourse = new Map();
+  for (const row of registrationRows) {
+    const key = toIdString(row.courseId);
+    if (!registrationSetByCourse.has(key)) registrationSetByCourse.set(key, new Set());
+    registrationSetByCourse.get(key).add(toIdString(row.studentId));
+  }
+
+  const generationContext = {
+    existingByDay,
+    existingByCourseDay,
+    registrationSetByCourse
+  };
   
   // Track courses that have been fully scheduled to prevent duplicate scheduling across allocations
   const fullyScheduledCourses = new Set();
+
+  const getTeacherClassesCountOnDayLocal = (teacherId, day) => {
+    const teacherIdStr = toIdString(teacherId);
+    const existingCount = (existingByDay.get(day) || []).filter(
+      (e) => toIdString(e.teacherId) === teacherIdStr
+    ).length;
+    const batchCount = scheduledInCurrentBatch.filter(
+      (s) => s.day === day && toIdString(s.teacherId) === teacherIdStr
+    ).length;
+    return existingCount + batchCount;
+  };
+
+  const getDayLoad = (day) => {
+    const existingCount = (existingByDay.get(day) || []).length;
+    const batchCount = scheduledInCurrentBatch.filter((s) => s.day === day).length;
+    return existingCount + batchCount;
+  };
+
+  const getOrderedDaysForTeacher = (teacherId, courseIdStr = '') => {
+    const base = [...days].sort((a, b) => {
+      const teacherA = getTeacherClassesCountOnDayLocal(teacherId, a);
+      const teacherB = getTeacherClassesCountOnDayLocal(teacherId, b);
+      const loadA = getDayLoad(a);
+      const loadB = getDayLoad(b);
+      if (loadA !== loadB) return loadA - loadB;
+      if (teacherA !== teacherB) return teacherA - teacherB;
+
+      return 0;
+    });
+
+    // Rotate tie-order per course so scheduling doesn't always start on Monday.
+    const hash = [...courseIdStr].reduce((acc, ch) => acc + ch.charCodeAt(0), 0);
+    const rotateBy = base.length > 0 ? hash % base.length : 0;
+    return [...base.slice(rotateBy), ...base.slice(0, rotateBy)];
+  };
+
+  const getTeacherDayCountStrict = async (teacherId, day) => {
+    const dbCount = await Timetable.countDocuments({
+      teacherId,
+      day,
+      academicYear,
+      status: 'active'
+    });
+    const batchCount = scheduledInCurrentBatch.filter(
+      (s) => s.day === day && toIdString(s.teacherId) === toIdString(teacherId)
+    ).length;
+    return dbCount + batchCount;
+  };
   
   console.log(`Generating timetable for ${degreeLevel}, ${filteredAllocations.length} allocations, ${classes.length} classrooms`);
 
@@ -613,6 +816,16 @@ const generateTimetable = async (degreeLevel, academicYear, timeSlots, days, pri
     }
     
     console.log(`Scheduling course ${course.courseCode || course.courseId}: ${classesToScheduleNow.length} classes to schedule (${existingInBatch.length} already scheduled, ${allClassesToSchedule.length} total required)`);
+    const registrations = registrationCountByCourse.get(course._id.toString()) || 0;
+    const eligibleClasses = classes.filter((c) => c.capacity >= registrations);
+    if (eligibleClasses.length === 0) {
+      unresolvedConflicts.push({
+        courseId: course._id,
+        courseName: course.courseName,
+        message: `No classroom has enough capacity (${registrations} students).`
+      });
+      continue;
+    }
     
     for (const classToSchedule of classesToScheduleNow) {
       const duration = classToSchedule.duration;
@@ -628,11 +841,11 @@ const generateTimetable = async (degreeLevel, academicYear, timeSlots, days, pri
 
       // Try to find a slot without conflicts
       // Priority: Student conflicts > Teacher conflicts > Classroom conflicts
-      for (const day of days) {
+      for (const day of getOrderedDaysForTeacher(teacher._id, courseIdStr)) {
         if (scheduled) break;
 
-        // Check if teacher can schedule on this day (max 2 classes per day)
-        const canSchedule = await canTeacherScheduleOnDay(teacher._id, day, academicYear, null, scheduledInCurrentBatch);
+        // First pass: keep teacher load at max 2/day
+        const canSchedule = getTeacherClassesCountOnDayLocal(teacher._id, day) < strictTeacherDailyLimit;
         if (!canSchedule) {
           continue; // Teacher already has 2 classes on this day
         }
@@ -643,38 +856,18 @@ const generateTimetable = async (degreeLevel, academicYear, timeSlots, days, pri
           // Check if we've already scheduled on this day for this course
           const alreadyScheduledToday = scheduledSlots.some(slot => slot.day === day);
           // Also check if teacher already has classes on this day
-          const teacherClassesOnDay = await getTeacherClassesCountOnDay(teacher._id, day, academicYear, null, scheduledInCurrentBatch);
+          const teacherClassesOnDay = getTeacherClassesCountOnDayLocal(teacher._id, day);
           
-          // Allow scheduling on same day if:
-          // 1. We haven't scheduled this course on this day yet, OR
-          // 2. Teacher has less than 2 classes on this day (can have consecutive classes with 10-min break)
-          if (alreadyScheduledToday && teacherClassesOnDay >= 1) {
-            // Check if we can still schedule (teacher has room for more classes)
-            if (teacherClassesOnDay >= 2) {
-              continue; // Teacher already has 2 classes on this day
-            }
-            // Otherwise, allow consecutive classes for the same course (with 10-min break)
+          // Strong spread rule: do not place same course twice on same day in primary pass.
+          if (alreadyScheduledToday) continue;
+
+          if (teacherClassesOnDay >= strictTeacherDailyLimit) {
+            continue;
           }
         }
 
-        // Filter out slots that would overlap with already scheduled slots for this course on this day
-        // Check within the same academic year first (primary concern)
-        const existingCourseTimetablesForDay = await Timetable.find({
-          courseId: course._id,
-          day,
-          academicYear,
-          status: 'active'
-        });
-        
-        // Also check across different academic years to prevent overlapping times completely
-        const existingCourseTimetablesForDayAllYears = await Timetable.find({
-          courseId: course._id,
-          day,
-          status: 'active',
-          academicYear: { $ne: academicYear }
-        });
-        
-        const allExistingForDay = [...existingCourseTimetablesForDay, ...existingCourseTimetablesForDayAllYears];
+        // Filter out slots that overlap course slots already in DB for this year/semester/day.
+        const existingCourseTimetablesForDay = existingByCourseDay.get(`${courseIdStr}|${day}`) || [];
         
         const filteredSlots = filterOverlappingSlots(
           availableSlots,
@@ -682,42 +875,27 @@ const generateTimetable = async (degreeLevel, academicYear, timeSlots, days, pri
           day,
           scheduledSlots,
           scheduledInCurrentBatch,
-          allExistingForDay
+          existingCourseTimetablesForDay
         );
+
+        const teacherExistingClasses = (existingByDay.get(day) || []).filter(
+          (e) => toIdString(e.teacherId) === toIdString(teacher._id)
+        );
+        const teacherScheduledInBatch = scheduledInCurrentBatch.filter(s =>
+          s.teacherId && (s.teacherId.toString() === teacher._id.toString() || (s.teacherId._id && s.teacherId._id.toString() === teacher._id.toString())) &&
+          s.day === day
+        );
+        const allTeacherClasses = [...teacherExistingClasses, ...teacherScheduledInBatch];
         
         for (const slot of filteredSlots) {
           if (scheduled) break;
 
           let { startTime, endTime } = slot;
           
-          // Check if this start time conflicts with any existing scheduled classes for this teacher
-          // If a teacher has a class ending at 10:30, next class should start at 10:40 (10-minute break)
-          const teacherExistingClasses = await Timetable.find({
-            teacherId: teacher._id,
-            day,
-            academicYear,
-            status: 'active'
-          });
-          
-          // Also check scheduledInCurrentBatch
-          const teacherScheduledInBatch = scheduledInCurrentBatch.filter(s => 
-            s.teacherId && (s.teacherId.toString() === teacher._id.toString() || (s.teacherId._id && s.teacherId._id.toString() === teacher._id.toString())) &&
-            s.day === day
-          );
-          
-          const allTeacherClasses = [...teacherExistingClasses, ...teacherScheduledInBatch];
-          
-          // Check if startTime violates 10-minute break rule
+          // Check if this slot violates minimum teacher gap (10 minutes)
           let violatesBreakRule = false;
           for (const existingClass of allTeacherClasses) {
-            const existingEndTime = existingClass.endTime;
-            const [h1, m1] = startTime.split(':').map(Number);
-            const [h2, m2] = existingEndTime.split(':').map(Number);
-            const startMinutes = h1 * 60 + m1;
-            const endMinutes = h2 * 60 + m2;
-            
-            // If new class starts before existing class ends + 10 minutes, it violates break rule
-            if (startMinutes < endMinutes + 10) {
+            if (violatesTeacherGapRule(startTime, endTime, existingClass.startTime, existingClass.endTime, 0)) {
               violatesBreakRule = true;
               break;
             }
@@ -728,18 +906,8 @@ const generateTimetable = async (degreeLevel, academicYear, timeSlots, days, pri
           }
 
           // Find available classroom
-          for (const classRoom of classes) {
+          for (const classRoom of eligibleClasses) {
             if (scheduled) break;
-
-            // Check if classroom capacity is sufficient
-            const registrations = await Registration.countDocuments({
-              courseId: course._id,
-              status: 'registered'
-            });
-
-            if (classRoom.capacity < registrations) {
-              continue;
-            }
 
             // Check if this slot was already used for this course (prevent duplicate)
             const slotKey = `${day}-${startTime}-${endTime}`;
@@ -769,38 +937,11 @@ const generateTimetable = async (degreeLevel, academicYear, timeSlots, days, pri
               continue; // This course already scheduled at this exact time or overlapping time
             }
             
-            // Also check database for overlapping times for this course
-            // Check same day and academic year first (most common case)
-            const existingCourseTimetables = await Timetable.find({
-              courseId: course._id,
-              day,
-              academicYear,
-              status: 'active'
-            });
-            
             let hasOverlappingInDB = false;
-            for (const existing of existingCourseTimetables) {
+            for (const existing of existingCourseTimetablesForDay) {
               if (timeOverlaps(startTime, endTime, existing.startTime, existing.endTime)) {
                 hasOverlappingInDB = true;
                 break;
-              }
-            }
-            
-            // Also check for overlapping times on the same day across different academic years
-            // This prevents scheduling the same course at overlapping times (e.g., 9:00-10:30 and 9:30-11:00)
-            if (!hasOverlappingInDB) {
-              const existingCourseTimetablesSameDay = await Timetable.find({
-                courseId: course._id,
-                day,
-                status: 'active',
-                academicYear: { $ne: academicYear } // Different academic year but same day
-              });
-              
-              for (const existing of existingCourseTimetablesSameDay) {
-                if (timeOverlaps(startTime, endTime, existing.startTime, existing.endTime)) {
-                  hasOverlappingInDB = true;
-                  break;
-                }
               }
             }
             
@@ -809,18 +950,16 @@ const generateTimetable = async (degreeLevel, academicYear, timeSlots, days, pri
             }
 
             // Check conflicts (use course semester for conflict checking)
-            const conflicts = await checkConflictsSimple(
-              course._id,
-              teacher._id,
-              classRoom._id,
+            const conflicts = checkConflictsFast({
+              courseId: course._id,
+              teacherId: teacher._id,
+              classId: classRoom._id,
               day,
               startTime,
               endTime,
-              course.semester, // Use course semester
-              academicYear,
-              null, // excludeId
-              scheduledInCurrentBatch // Pass current batch to prevent duplicates
-            );
+              scheduledInCurrentBatch,
+              context: generationContext
+            });
 
             // CRITICAL: Student conflicts must be zero - do not schedule if students have conflicts
             // Also check for duplicate course scheduling (same course at overlapping times)
@@ -829,6 +968,12 @@ const generateTimetable = async (degreeLevel, academicYear, timeSlots, days, pri
                 conflicts.teacher.length === 0 && 
                 conflicts.classroom.length === 0 &&
                 conflicts.duplicate.length === 0) {
+              // Final hard-stop: never allow >2 classes/day for a teacher.
+              const strictTeacherCount = await getTeacherDayCountStrict(teacher._id, day);
+              if (strictTeacherCount >= strictTeacherDailyLimit) {
+                continue;
+              }
+
               const timetable = await Timetable.create({
                 courseId: course._id,
                 teacherId: teacher._id,
@@ -885,9 +1030,9 @@ const generateTimetable = async (degreeLevel, academicYear, timeSlots, days, pri
         let bestSlot = null;
         let minConflicts = Infinity;
 
-        for (const day of days) {
-          // Check if teacher can schedule on this day (max 2 classes per day)
-          const canSchedule = await canTeacherScheduleOnDay(teacher._id, day, academicYear, null, scheduledInCurrentBatch);
+        for (const day of getOrderedDaysForTeacher(teacher._id, courseIdStr)) {
+          // First fallback pass: keep teacher load at max 2/day
+          const canSchedule = getTeacherClassesCountOnDayLocal(teacher._id, day) < strictTeacherDailyLimit;
           if (!canSchedule) {
             continue; // Teacher already has 2 classes on this day
           }
@@ -896,31 +1041,15 @@ const generateTimetable = async (degreeLevel, academicYear, timeSlots, days, pri
           // But allow consecutive classes if teacher has room
           if (scheduledSlots.length > 0 && allClassesToSchedule.length > 1) {
             const alreadyScheduledToday = scheduledSlots.some(slot => slot.day === day);
-            const teacherClassesOnDay = await getTeacherClassesCountOnDay(teacher._id, day, academicYear, null, scheduledInCurrentBatch);
+            const teacherClassesOnDay = getTeacherClassesCountOnDayLocal(teacher._id, day);
             
-            if (alreadyScheduledToday && teacherClassesOnDay >= 2) {
-              continue; // Teacher already has 2 classes on this day
-            }
+            // Keep spread in fallback too: avoid same course twice on same day.
+            if (alreadyScheduledToday) continue;
+            if (teacherClassesOnDay >= strictTeacherDailyLimit) continue;
           }
 
-          // Filter out slots that would overlap with already scheduled slots for this course on this day
-          // Check within the same academic year first (primary concern)
-          const existingCourseTimetablesForDayFallback = await Timetable.find({
-            courseId: course._id,
-            day,
-            academicYear,
-            status: 'active'
-          });
-          
-          // Also check across different academic years to prevent overlapping times completely
-          const existingCourseTimetablesForDayAllYearsFallback = await Timetable.find({
-            courseId: course._id,
-            day,
-            status: 'active',
-            academicYear: { $ne: academicYear }
-          });
-          
-          const allExistingForDayFallback = [...existingCourseTimetablesForDayFallback, ...existingCourseTimetablesForDayAllYearsFallback];
+          // Filter out slots that overlap course slots already in DB for this year/semester/day.
+          const existingCourseTimetablesForDayFallback = existingByCourseDay.get(`${courseIdStr}|${day}`) || [];
           
           const filteredSlotsFallback = filterOverlappingSlots(
             availableSlots,
@@ -928,8 +1057,17 @@ const generateTimetable = async (degreeLevel, academicYear, timeSlots, days, pri
             day,
             scheduledSlots,
             scheduledInCurrentBatch,
-            allExistingForDayFallback
+            existingCourseTimetablesForDayFallback
           );
+
+          const teacherExistingClasses = (existingByDay.get(day) || []).filter(
+            (e) => toIdString(e.teacherId) === toIdString(teacher._id)
+          );
+          const teacherScheduledInBatch = scheduledInCurrentBatch.filter(s =>
+            s.teacherId && (s.teacherId.toString() === teacher._id.toString() || (s.teacherId._id && s.teacherId._id.toString() === teacher._id.toString())) &&
+            s.day === day
+          );
+          const allTeacherClasses = [...teacherExistingClasses, ...teacherScheduledInBatch];
           
           for (const slot of filteredSlotsFallback) {
             let { startTime, endTime } = slot;
@@ -940,32 +1078,10 @@ const generateTimetable = async (degreeLevel, academicYear, timeSlots, days, pri
               continue;
             }
             
-            // Check 10-minute break rule for teacher
-            const teacherExistingClasses = await Timetable.find({
-              teacherId: teacher._id,
-              day,
-              academicYear,
-              status: 'active'
-            });
-            
-            const teacherScheduledInBatch = scheduledInCurrentBatch.filter(s => 
-              s.teacherId && (s.teacherId.toString() === teacher._id.toString() || (s.teacherId._id && s.teacherId._id.toString() === teacher._id.toString())) &&
-              s.day === day
-            );
-            
-            const allTeacherClasses = [...teacherExistingClasses, ...teacherScheduledInBatch];
-            
-            // Check if startTime violates 10-minute break rule
+            // Check if this slot violates minimum teacher gap (10 minutes)
             let violatesBreakRule = false;
             for (const existingClass of allTeacherClasses) {
-              const existingEndTime = existingClass.endTime;
-              const [h1, m1] = startTime.split(':').map(Number);
-              const [h2, m2] = existingEndTime.split(':').map(Number);
-              const startMinutes = h1 * 60 + m1;
-              const endMinutes = h2 * 60 + m2;
-              
-              // If new class starts before existing class ends + 10 minutes, it violates break rule
-              if (startMinutes < endMinutes + 10) {
+              if (violatesTeacherGapRule(startTime, endTime, existingClass.startTime, existingClass.endTime, 0)) {
                 violatesBreakRule = true;
                 break;
               }
@@ -997,38 +1113,11 @@ const generateTimetable = async (degreeLevel, academicYear, timeSlots, days, pri
               continue; // This course already scheduled at this exact time or overlapping time
             }
             
-            // Also check database for overlapping times for this course
-            // Check same day and academic year first (most common case)
-            const existingCourseTimetables = await Timetable.find({
-              courseId: course._id,
-              day,
-              academicYear,
-              status: 'active'
-            });
-            
             let hasOverlappingInDB = false;
-            for (const existing of existingCourseTimetables) {
+            for (const existing of existingCourseTimetablesForDayFallback) {
               if (timeOverlaps(startTime, endTime, existing.startTime, existing.endTime)) {
                 hasOverlappingInDB = true;
                 break;
-              }
-            }
-            
-            // Also check for overlapping times on the same day across different academic years
-            // This prevents scheduling the same course at overlapping times (e.g., 9:00-10:30 and 9:30-11:00)
-            if (!hasOverlappingInDB) {
-              const existingCourseTimetablesSameDay = await Timetable.find({
-                courseId: course._id,
-                day,
-                status: 'active',
-                academicYear: { $ne: academicYear } // Different academic year but same day
-              });
-              
-              for (const existing of existingCourseTimetablesSameDay) {
-                if (timeOverlaps(startTime, endTime, existing.startTime, existing.endTime)) {
-                  hasOverlappingInDB = true;
-                  break;
-                }
               }
             }
             
@@ -1036,37 +1125,26 @@ const generateTimetable = async (degreeLevel, academicYear, timeSlots, days, pri
               continue; // Course already has overlapping class in database, skip this slot
             }
 
-            for (const classRoom of classes) {
-              const registrations = await Registration.countDocuments({
+            for (const classRoom of eligibleClasses) {
+
+              const conflicts = checkConflictsFast({
                 courseId: course._id,
-                status: 'registered'
-              });
-
-              if (classRoom.capacity < registrations) {
-                continue;
-              }
-
-              const conflicts = await checkConflictsSimple(
-                course._id,
-                teacher._id,
-                classRoom._id,
+                teacherId: teacher._id,
+                classId: classRoom._id,
                 day,
                 startTime,
                 endTime,
-                course.semester, // Use course semester
-                academicYear,
-                null, // excludeId
-                scheduledInCurrentBatch // Pass current batch to prevent duplicates
-              );
+                scheduledInCurrentBatch,
+                context: generationContext
+              });
 
-              // CRITICAL: Only consider slots with ZERO student conflicts and no duplicates
-              if (conflicts.student.length > 0 || conflicts.duplicate.length > 0) {
-                continue; // Skip this slot - student conflicts and duplicates are not acceptable
+              // Hard constraints: no student clash, no teacher overlap, no duplicate course slot.
+              if (conflicts.student.length > 0 || conflicts.teacher.length > 0 || conflicts.duplicate.length > 0) {
+                continue;
               }
 
-              // Weight conflicts: Teacher conflicts (weight 5), classroom (weight 1)
-              // Student conflicts already filtered out above
-              const totalConflicts = (conflicts.teacher.length * 5) + conflicts.classroom.length;
+              // Prefer minimum classroom conflicts among hard-safe candidates.
+              const totalConflicts = conflicts.classroom.length;
 
               if (totalConflicts < minConflicts) {
                 minConflicts = totalConflicts;
@@ -1083,8 +1161,14 @@ const generateTimetable = async (degreeLevel, academicYear, timeSlots, days, pri
           }
         }
 
-        // Only schedule if we found a slot with zero student conflicts and no duplicates
-        if (bestSlot && bestSlot.conflicts.student.length === 0 && bestSlot.conflicts.duplicate.length === 0) {
+        // Schedule fallback slot as long as hard constraints are satisfied.
+        if (bestSlot && bestSlot.conflicts.student.length === 0 && bestSlot.conflicts.teacher.length === 0 && bestSlot.conflicts.duplicate.length === 0) {
+          // Final hard-stop in fallback path as well.
+          const strictTeacherCount = await getTeacherDayCountStrict(teacher._id, bestSlot.day);
+          if (strictTeacherCount >= strictTeacherDailyLimit) {
+            continue;
+          }
+
           const timetable = await Timetable.create({
             courseId: course._id,
             teacherId: teacher._id,
@@ -1106,6 +1190,7 @@ const generateTimetable = async (degreeLevel, academicYear, timeSlots, days, pri
             slotKey: bestSlot.slotKey 
           });
           scheduledClasses++;
+          scheduled = true;
           
           // Add to current batch tracking
           scheduledInCurrentBatch.push({
@@ -1127,6 +1212,7 @@ const generateTimetable = async (degreeLevel, academicYear, timeSlots, days, pri
           });
         }
       }
+
     }
 
     // Check if course is now fully scheduled

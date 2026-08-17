@@ -1,20 +1,23 @@
 const Timetable = require('../models/Timetable');
 const Registration = require('../models/Registration');
 const { generateTimetable, checkConflicts } = require('../utils/timetableGenerator');
+const { SEMESTER_NUMBERS } = require('../config/constants');
+
+const getDefaultAcademicYear = () => {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = now.getMonth(); // 0-based
+  // Academic year assumed to roll over in August.
+  const startYear = month >= 7 ? year : year - 1;
+  return `${startYear}-${startYear + 1}`;
+};
 
 // @desc    Generate timetable automatically
 // @route   POST /api/timetable/generate
 // @access  Private/Admin
 exports.generateTimetable = async (req, res) => {
   try {
-    const { semester, academicYear } = req.body;
-
-    if (!semester || !academicYear) {
-      return res.status(400).json({
-        success: false,
-        message: 'Please provide semester and academic year'
-      });
-    }
+    const academicYear = req.body.academicYear || getDefaultAcademicYear();
 
     // Default time slots and days
     const timeSlots = req.body.timeSlots || [
@@ -33,26 +36,52 @@ exports.generateTimetable = async (req, res) => {
       'Friday'
     ];
 
-    // Delete existing timetable for this semester and academic year
-    await Timetable.deleteMany({ semester, academicYear });
+    // Delete existing timetable for this academic year (all semesters)
+    await Timetable.deleteMany({ academicYear });
 
-    // Generate new timetable
-    const result = await generateTimetable(semester, academicYear, timeSlots, days);
+    // Generate timetable for all degree levels (BS, Master, MPhil) and all semesters (1-12)
+    const degreeLevels = ['BS', 'Master', 'MPhil'];
+    const semesters = SEMESTER_NUMBERS;
+    const allTimetables = [];
+    const allUnresolvedConflicts = [];
+    let totalScheduled = 0;
+    let totalConflicts = 0;
+
+    for (const degreeLevel of degreeLevels) {
+      for (const semester of semesters) {
+        // Generate timetable for this degree level and semester
+        const result = await generateTimetable(
+          degreeLevel, 
+          academicYear, 
+          timeSlots, 
+          days, 
+          req.body.priorities || {},
+          semester // Pass semester to filter courses
+        );
+        
+        allTimetables.push(...result.timetables);
+        allUnresolvedConflicts.push(...result.unresolvedConflicts);
+        totalScheduled += result.timetables.length;
+        totalConflicts += result.unresolvedConflicts.length;
+      }
+    }
 
     const populatedTimetables = await Timetable.find({
-      _id: { $in: result.timetables.map(t => t._id) }
+      academicYear,
+      status: 'active'
     })
       .populate('courseId', 'courseId courseName courseCode')
       .populate('teacherId', 'name email')
-      .populate('classId', 'className capacity location');
+      .populate('classId', 'className capacity location')
+      .sort({ semester: 1, day: 1, startTime: 1 });
 
     res.status(201).json({
       success: true,
-      message: `Timetable generated. ${result.totalScheduled} courses scheduled. ${result.totalConflicts} courses have conflicts.`,
-      totalScheduled: result.totalScheduled,
-      totalConflicts: result.totalConflicts,
+      message: `Timetable generated for Academic Year ${academicYear} (all semesters 1-12). ${totalScheduled} courses scheduled. ${totalConflicts} courses have conflicts.`,
+      totalScheduled,
+      totalConflicts,
       timetables: populatedTimetables,
-      unresolvedConflicts: result.unresolvedConflicts
+      unresolvedConflicts: allUnresolvedConflicts
     });
   } catch (error) {
     res.status(500).json({
@@ -286,21 +315,18 @@ exports.deleteTimetableEntry = async (req, res) => {
   }
 };
 
-// @desc    Delete entire timetable
+// @desc    Delete entire timetable (optionally filter by academic year/semester)
 // @route   DELETE /api/timetable
 // @access  Private/Admin
 exports.deleteTimetable = async (req, res) => {
   try {
     const { semester, academicYear } = req.query;
 
-    if (!semester || !academicYear) {
-      return res.status(400).json({
-        success: false,
-        message: 'Please provide semester and academic year'
-      });
-    }
+    const filter = {};
+    if (academicYear) filter.academicYear = academicYear;
+    if (semester) filter.semester = parseInt(semester, 10);
 
-    const result = await Timetable.deleteMany({ semester, academicYear });
+    const result = await Timetable.deleteMany(filter);
 
     res.json({
       success: true,

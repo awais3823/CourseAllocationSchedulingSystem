@@ -6,7 +6,9 @@ const {
   addPendingUser,
   uploadPendingUsers,
   getPendingUsers,
-  deletePendingUser
+  deletePendingUser,
+  getUsersByRole,
+  deleteUserWithData
 } = require('../controllers/userManagementController');
 const { protect, authorize } = require('../middleware/auth');
 
@@ -41,6 +43,8 @@ router.post('/pending', protect, authorize('admin'), addPendingUserValidation, a
 router.post('/pending/upload', protect, authorize('admin'), upload.single('file'), uploadPendingUsers);
 router.get('/pending', protect, authorize('admin'), getPendingUsers);
 router.delete('/pending/:id', protect, authorize('admin'), deletePendingUser);
+router.get('/', protect, authorize('admin'), getUsersByRole);
+router.delete('/:id', protect, authorize('admin'), deleteUserWithData);
 
 module.exports = router;
 

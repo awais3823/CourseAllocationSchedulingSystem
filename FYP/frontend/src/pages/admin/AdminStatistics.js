@@ -1,6 +1,22 @@
 import React, { useState, useEffect } from 'react';
 import api from '../../services/api';
 import './AdminPages.css';
+import { 
+  Users, 
+  GraduationCap, 
+  User, 
+  Clock, 
+  BookOpen, 
+  Circle, 
+  CheckCircle2, 
+  XCircle, 
+  TrendingUp, 
+  TrendingDown, 
+  Calendar, 
+  ClipboardList, 
+  School, 
+  Armchair 
+} from 'lucide-react';
 
 const AdminStatistics = () => {
   const [stats, setStats] = useState(null);
@@ -65,27 +81,27 @@ const AdminStatistics = () => {
         <button onClick={loadStatistics} className="btn btn-secondary">Refresh</button>
       </div>
 
-      {/* User Statistics */}
+      {/* User Statistics - counts only, no navigation to lists */}
       <div className="stats-section">
         <h2>User Statistics</h2>
         <div className="stats-grid">
-          <div className="stat-card">
-            <div className="stat-icon">👥</div>
+          <div className="stat-card admin-stat-card">
+            <div className="stat-icon"><Users size={28} /></div>
             <div className="stat-value">{stats.users?.totalStudents || 0}</div>
             <div className="stat-label">Total Students</div>
           </div>
-          <div className="stat-card">
-            <div className="stat-icon">👨‍🏫</div>
+          <div className="stat-card admin-stat-card">
+            <div className="stat-icon"><GraduationCap size={28} /></div>
             <div className="stat-value">{stats.users?.totalTeachers || 0}</div>
             <div className="stat-label">Total Teachers</div>
           </div>
-          <div className="stat-card">
-            <div className="stat-icon">👤</div>
+          <div className="stat-card admin-stat-card">
+            <div className="stat-icon"><User size={28} /></div>
             <div className="stat-value">{stats.users?.totalAdmins || 0}</div>
             <div className="stat-label">Total Admins</div>
           </div>
-          <div className="stat-card">
-            <div className="stat-icon">⏳</div>
+          <div className="stat-card admin-stat-card">
+            <div className="stat-icon"><Clock size={28} /></div>
             <div className="stat-value">{stats.users?.pendingUsers || 0}</div>
             <div className="stat-label">Pending Users</div>
           </div>
@@ -96,18 +112,18 @@ const AdminStatistics = () => {
       <div className="stats-section">
         <h2>Course Statistics</h2>
         <div className="stats-grid">
-          <div className="stat-card">
-            <div className="stat-icon">📚</div>
+          <div className="stat-card admin-stat-card">
+            <div className="stat-icon"><BookOpen size={28} /></div>
             <div className="stat-value">{stats.courses?.totalCourses || 0}</div>
             <div className="stat-label">Total Courses</div>
           </div>
-          <div className="stat-card">
-            <div className="stat-icon">🔴</div>
+          <div className="stat-card admin-stat-card">
+            <div className="stat-icon"><Circle size={28} style={{ color: '#dc3545' }} /></div>
             <div className="stat-value">{stats.courses?.fullCourses || 0}</div>
             <div className="stat-label">Full Courses</div>
           </div>
-          <div className="stat-card">
-            <div className="stat-icon">🟡</div>
+          <div className="stat-card admin-stat-card">
+            <div className="stat-icon"><Circle size={28} style={{ color: '#ff9800' }} /></div>
             <div className="stat-value">{stats.courses?.nearlyFullCourses || 0}</div>
             <div className="stat-label">Nearly Full (80%+)</div>
           </div>
@@ -191,23 +207,23 @@ const AdminStatistics = () => {
       <div className="stats-section">
         <h2>Registration Statistics</h2>
         <div className="stats-grid">
-          <div className="stat-card">
-            <div className="stat-icon">✅</div>
+          <div className="stat-card admin-stat-card">
+            <div className="stat-icon"><CheckCircle2 size={28} /></div>
             <div className="stat-value">{stats.registrations?.totalRegistrations || 0}</div>
             <div className="stat-label">Active Registrations</div>
           </div>
-          <div className="stat-card">
-            <div className="stat-icon">❌</div>
+          <div className="stat-card admin-stat-card">
+            <div className="stat-icon"><XCircle size={28} /></div>
             <div className="stat-value">{stats.registrations?.droppedRegistrations || 0}</div>
             <div className="stat-label">Dropped Courses</div>
           </div>
-          <div className="stat-card">
-            <div className="stat-icon">📈</div>
+          <div className="stat-card admin-stat-card">
+            <div className="stat-icon"><TrendingUp size={28} /></div>
             <div className="stat-value">{stats.registrations?.recentRegistrations || 0}</div>
             <div className="stat-label">New (Last 7 Days)</div>
           </div>
-          <div className="stat-card">
-            <div className="stat-icon">📉</div>
+          <div className="stat-card admin-stat-card">
+            <div className="stat-icon"><TrendingDown size={28} /></div>
             <div className="stat-value">{stats.registrations?.recentDrops || 0}</div>
             <div className="stat-label">Drops (Last 7 Days)</div>
           </div>
@@ -218,8 +234,8 @@ const AdminStatistics = () => {
       <div className="stats-section">
         <h2>Timetable Statistics</h2>
         <div className="stats-grid">
-          <div className="stat-card">
-            <div className="stat-icon">📅</div>
+          <div className="stat-card admin-stat-card">
+            <div className="stat-icon"><Calendar size={28} /></div>
             <div className="stat-value">{stats.timetable?.totalEntries || 0}</div>
             <div className="stat-label">Total Timetable Entries</div>
           </div>
@@ -254,8 +270,8 @@ const AdminStatistics = () => {
       <div className="stats-section">
         <h2>Allocation Statistics</h2>
         <div className="stats-grid">
-          <div className="stat-card">
-            <div className="stat-icon">📋</div>
+          <div className="stat-card admin-stat-card">
+            <div className="stat-icon"><ClipboardList size={28} /></div>
             <div className="stat-value">{stats.allocations?.totalAllocations || 0}</div>
             <div className="stat-label">Total Allocations</div>
           </div>
@@ -290,13 +306,13 @@ const AdminStatistics = () => {
       <div className="stats-section">
         <h2>Classroom Statistics</h2>
         <div className="stats-grid">
-          <div className="stat-card">
-            <div className="stat-icon">🏫</div>
+          <div className="stat-card admin-stat-card">
+            <div className="stat-icon"><School size={28} /></div>
             <div className="stat-value">{stats.classrooms?.totalClassrooms || 0}</div>
             <div className="stat-label">Total Classrooms</div>
           </div>
-          <div className="stat-card">
-            <div className="stat-icon">💺</div>
+          <div className="stat-card admin-stat-card">
+            <div className="stat-icon"><Armchair size={28} /></div>
             <div className="stat-value">{stats.classrooms?.totalCapacity || 0}</div>
             <div className="stat-label">Total Capacity</div>
           </div>

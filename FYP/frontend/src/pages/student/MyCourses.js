@@ -69,9 +69,18 @@ const MyCourses = () => {
     return <div className="loading"><div className="spinner"></div></div>;
   }
 
-  const totalCredits = registrations.reduce((sum, reg) => sum + (reg.courseId?.credits || 0), 0);
-  const droppedRegistrations = registrations.filter(reg => reg.status === 'dropped');
-  const activeRegistrations = registrations.filter(reg => reg.status === 'registered');
+  const totalCredits = registrations.reduce(
+    (sum, reg) => sum + (reg.courseId?.credits || 0),
+    0
+  );
+  // Only show dropped courses that still have a valid course
+  // so "removed by administrator" rows don't appear in history.
+  const droppedRegistrations = registrations.filter(
+    (reg) => reg.status === 'dropped' && reg.courseId
+  );
+  const activeRegistrations = registrations.filter(
+    (reg) => reg.status === 'registered'
+  );
 
   return (
     <div className="page-container">
@@ -121,36 +130,75 @@ const MyCourses = () => {
         <>
           <h2>Active Registrations</h2>
           <table className="table">
-          <thead>
-            <tr>
-              <th>Course Code</th>
-              <th>Course Name</th>
-              <th>Credits</th>
-              <th>Semester</th>
-              <th>Program</th>
-              <th>Registration Date</th>
-              <th>Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {registrations.map(reg => (
-              <tr key={reg._id}>
-                <td>{reg.courseId.courseCode}</td>
-                <td>{reg.courseId.courseName}</td>
-                <td>{reg.courseId.credits}</td>
-                <td>{reg.courseId.semester}</td>
-                <td>{reg.courseId.program}</td>
-                <td>{new Date(reg.registrationDate).toLocaleDateString()}</td>
-                <td>
-                  <button
-                    onClick={() => handleDrop(reg._id, reg.courseId.courseName)}
-                    className="btn btn-danger btn-sm"
-                  >
-                    Drop
-                  </button>
-                </td>
+            <thead>
+              <tr>
+                <th>Course Code</th>
+                <th>Course Name</th>
+                <th>Credits</th>
+                <th>Semester</th>
+                <th>Program</th>
+                <th>Attendance</th>
+                <th>Registration Date</th>
+                <th>Actions</th>
               </tr>
-            ))}
+            </thead>
+            <tbody>
+              {activeRegistrations.map((reg) => {
+                // In rare cases the course may have been deleted
+                // but the registration document still exists.
+                if (!reg.courseId) {
+                  return (
+                    <tr key={reg._id}>
+                      <td
+                        colSpan={8}
+                        style={{
+                          fontStyle: 'italic',
+                          color: '#6c757d',
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center'
+                        }}
+                      >
+                        <span>
+                          Course no longer available (removed by administrator)
+                        </span>
+                        <button
+                          onClick={() => handleDrop(reg._id, 'this course')}
+                          className="btn btn-danger btn-sm"
+                        >
+                          Remove
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                }
+
+                return (
+                  <tr key={reg._id}>
+                    <td>{reg.courseId.courseCode}</td>
+                    <td>{reg.courseId.courseName}</td>
+                    <td>{reg.courseId.credits}</td>
+                    <td>{reg.courseId.semester}</td>
+                    <td>{reg.courseId.program}</td>
+                    <td>
+                      {(reg.attendanceSummary?.presentCount || 0)}/
+                      {(reg.attendanceSummary?.totalSessions || 0)} (
+                      {reg.attendanceSummary?.percentage || 0}%)
+                    </td>
+                    <td>{new Date(reg.registrationDate).toLocaleDateString()}</td>
+                    <td>
+                      <button
+                        onClick={() =>
+                          handleDrop(reg._id, reg.courseId.courseName)
+                        }
+                        className="btn btn-danger btn-sm"
+                      >
+                        Drop
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
           {droppedRegistrations.length > 0 && (

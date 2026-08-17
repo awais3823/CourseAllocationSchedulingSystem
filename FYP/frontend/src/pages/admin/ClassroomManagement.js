@@ -75,8 +75,8 @@ const ClassroomManagement = () => {
     <div className="page-container">
       <div className="page-header">
         <h1>Classroom Management</h1>
-        <button onClick={() => setShowForm(!showForm)} className="btn btn-primary">
-          {showForm ? 'Cancel' : 'Add Classroom'}
+        <button onClick={() => setShowForm(true)} className="btn btn-primary">
+          Add Classroom
         </button>
       </div>
 
@@ -84,49 +84,54 @@ const ClassroomManagement = () => {
       {success && <div className="alert alert-success">{success}</div>}
 
       {showForm && (
-        <div className="card">
-          <h2>Add New Classroom</h2>
-          <form onSubmit={handleSubmit}>
-            <div className="form-group">
-              <label>Classroom Name</label>
-              <input
-                type="text"
-                value={formData.className}
-                onChange={(e) => setFormData({ ...formData, className: e.target.value })}
-                required
-                placeholder="e.g., A101"
-              />
+        <div className="gen-modal-overlay" onClick={() => { setShowForm(false); setFormData({ className: '', capacity: '', location: '', facilities: '' }); }}>
+          <div className="gen-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="gen-modal__header">
+              <h2>Add New Classroom</h2>
+              <button className="gen-modal__close" onClick={() => { setShowForm(false); setFormData({ className: '', capacity: '', location: '', facilities: '' }); }}>✕</button>
             </div>
-            <div className="form-group">
-              <label>Capacity</label>
-              <input
-                type="number"
-                min="1"
-                value={formData.capacity}
-                onChange={(e) => setFormData({ ...formData, capacity: e.target.value })}
-                required
-              />
-            </div>
-            <div className="form-group">
-              <label>Location</label>
-              <input
-                type="text"
-                value={formData.location}
-                onChange={(e) => setFormData({ ...formData, location: e.target.value })}
-                placeholder="e.g., Building A, First Floor"
-              />
-            </div>
-            <div className="form-group">
-              <label>Facilities (comma-separated)</label>
-              <input
-                type="text"
-                value={formData.facilities}
-                onChange={(e) => setFormData({ ...formData, facilities: e.target.value })}
-                placeholder="e.g., Projector, Whiteboard, WiFi"
-              />
-            </div>
-            <button type="submit" className="btn btn-primary">Add Classroom</button>
-          </form>
+            <form onSubmit={handleSubmit}>
+              <div className="form-group">
+                <label>Classroom Name</label>
+                <input
+                  type="text"
+                  value={formData.className}
+                  onChange={(e) => setFormData({ ...formData, className: e.target.value })}
+                  required
+                  placeholder="e.g., A101"
+                />
+              </div>
+              <div className="form-group">
+                <label>Capacity</label>
+                <input
+                  type="number"
+                  min="1"
+                  value={formData.capacity}
+                  onChange={(e) => setFormData({ ...formData, capacity: e.target.value })}
+                  required
+                />
+              </div>
+              <div className="form-group">
+                <label>Location</label>
+                <input
+                  type="text"
+                  value={formData.location}
+                  onChange={(e) => setFormData({ ...formData, location: e.target.value })}
+                  placeholder="e.g., Building A, First Floor"
+                />
+              </div>
+              <div className="form-group">
+                <label>Facilities (comma-separated)</label>
+                <input
+                  type="text"
+                  value={formData.facilities}
+                  onChange={(e) => setFormData({ ...formData, facilities: e.target.value })}
+                  placeholder="e.g., Projector, Whiteboard, WiFi"
+                />
+              </div>
+              <button type="submit" className="btn btn-primary">Add Classroom</button>
+            </form>
+          </div>
         </div>
       )}
 

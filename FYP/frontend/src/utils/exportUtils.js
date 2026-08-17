@@ -1,4 +1,6 @@
 // Export utility functions for PDF and Excel
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
 
 export const exportToExcel = (data, filename = 'export') => {
   // Simple CSV export (can be enhanced with xlsx library)
@@ -46,6 +48,130 @@ export const exportTimetableToCSV = (timetable) => {
   }));
 
   exportToExcel(data, 'timetable');
+};
+
+export const exportTimetableToPDF = (timetable = []) => {
+  if (!timetable.length) {
+    alert('No timetable data to export');
+    return;
+  }
+
+  const doc = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a4' });
+  doc.setFontSize(14);
+  doc.text('Timetable Report', 40, 40);
+
+  const bySemester = {};
+  timetable.forEach((entry) => {
+    const sem = Number(entry.semester) || 0;
+    if (!bySemester[sem]) bySemester[sem] = [];
+    bySemester[sem].push(entry);
+  });
+
+  const semesters = Object.keys(bySemester).map(Number).sort((a, b) => a - b);
+  let y = 60;
+
+  semesters.forEach((sem, idx) => {
+    if (idx > 0 && y > 470) {
+      doc.addPage();
+      y = 40;
+    }
+    doc.setFontSize(11);
+    doc.text(`Semester ${sem}`, 40, y);
+
+    const rows = bySemester[sem]
+      .slice()
+      .sort((a, b) => {
+        const dayCmp = String(a.day || '').localeCompare(String(b.day || ''));
+        if (dayCmp !== 0) return dayCmp;
+        return String(a.startTime || '').localeCompare(String(b.startTime || ''));
+      })
+      .map((entry) => [
+        entry.courseId?.courseCode || '',
+        entry.courseId?.courseName || '',
+        entry.teacherId?.name || '',
+        entry.classId?.className || '',
+        entry.day || '',
+        `${entry.startTime || ''}-${entry.endTime || ''}`,
+        entry.academicYear || ''
+      ]);
+
+    autoTable(doc, {
+      startY: y + 8,
+      head: [['Course Code', 'Course Name', 'Teacher', 'Classroom', 'Day', 'Time', 'Academic Year']],
+      body: rows,
+      styles: { fontSize: 8, cellPadding: 4 },
+      headStyles: { fillColor: [11, 60, 93] }
+    });
+
+    y = (doc.lastAutoTable?.finalY || y + 8) + 18;
+  });
+
+  doc.save(`timetable-${new Date().toISOString().slice(0, 10)}.pdf`);
+};
+
+export const exportExamDatesheetToPDF = (datesheet) => {
+  const entries = datesheet?.entries || [];
+  if (!entries.length) {
+    alert('No exam datesheet data to export');
+    return;
+  }
+
+  const doc = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a4' });
+  doc.setFontSize(14);
+  doc.text('Exam Datesheet Report', 40, 40);
+  doc.setFontSize(10);
+  doc.text(`Exam ID: ${datesheet?.examId || '-'}`, 40, 58);
+  doc.text(`Academic Year: ${datesheet?.academicYear || '-'}`, 240, 58);
+
+  const bySemester = {};
+  entries.forEach((entry) => {
+    const sem = Number(entry.semester) || 0;
+    if (!bySemester[sem]) bySemester[sem] = [];
+    bySemester[sem].push(entry);
+  });
+
+  const semesters = Object.keys(bySemester).map(Number).sort((a, b) => a - b);
+  let y = 74;
+
+  semesters.forEach((sem, idx) => {
+    if (idx > 0 && y > 470) {
+      doc.addPage();
+      y = 40;
+    }
+    doc.setFontSize(11);
+    doc.text(`Semester ${sem}`, 40, y);
+
+    const rows = bySemester[sem]
+      .slice()
+      .sort((a, b) => {
+        const dateA = a.examDate ? new Date(a.examDate).getTime() : 0;
+        const dateB = b.examDate ? new Date(b.examDate).getTime() : 0;
+        if (dateA !== dateB) return dateA - dateB;
+        return String(a.timeSlot || '').localeCompare(String(b.timeSlot || ''));
+      })
+      .map((entry) => [
+        entry.courseCode || '',
+        entry.courseName || '',
+        entry.teacherName || '',
+        entry.className || '',
+        entry.examDate ? new Date(entry.examDate).toLocaleDateString() : '',
+        entry.timeSlot || '',
+        `${entry.startTime || ''}-${entry.endTime || ''}`,
+        entry.totalStudents ?? ''
+      ]);
+
+    autoTable(doc, {
+      startY: y + 8,
+      head: [['Course Code', 'Course Name', 'Teacher', 'Classroom', 'Exam Date', 'Slot', 'Time', 'Students']],
+      body: rows,
+      styles: { fontSize: 8, cellPadding: 4 },
+      headStyles: { fillColor: [11, 60, 93] }
+    });
+
+    y = (doc.lastAutoTable?.finalY || y + 8) + 18;
+  });
+
+  doc.save(`exam-datesheet-${new Date().toISOString().slice(0, 10)}.pdf`);
 };
 
 export const exportRegistrationsToCSV = (registrations) => {

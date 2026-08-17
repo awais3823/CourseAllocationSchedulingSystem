@@ -27,10 +27,14 @@ app.use('/api/classes', require('./routes/classes'));
 app.use('/api/timetable', require('./routes/timetable'));
 app.use('/api/users', require('./routes/users'));
 app.use('/api/statistics', require('./routes/statistics'));
+app.use('/api/exam-datesheets', require('./routes/examDatesheets'));
+app.use('/api/overload-requests', require('./routes/overloadRequests'));
+app.use('/api/results', require('./routes/results'));
+app.use('/api/attendance', require('./routes/attendance'));
 
 // Health check
 app.get('/api/health', (req, res) => {
-  res.json({ status: 'OK', message: 'Course Allocation & Scheduling System API' });
+  res.json({ status: 'OK', message: 'ScheduliX API' });
 });
 
 // Error handling middleware

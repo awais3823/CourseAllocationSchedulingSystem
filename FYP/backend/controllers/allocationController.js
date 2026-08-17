@@ -7,7 +7,23 @@ const User = require('../models/User');
 // @access  Private/Admin
 exports.allocateCourse = async (req, res) => {
   try {
-    const { teacherId, courseId } = req.body;
+    const { teacherId } = req.body;
+    const courseIdsRaw = req.body.courseIds ?? (req.body.courseId ? [req.body.courseId] : []);
+    const courseIds = Array.isArray(courseIdsRaw) ? courseIdsRaw.filter(Boolean) : [];
+
+    if (!teacherId) {
+      return res.status(400).json({
+        success: false,
+        message: 'teacherId is required'
+      });
+    }
+
+    if (courseIds.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Please provide at least one courseId (courseIds[])'
+      });
+    }
 
     // Check if teacher exists and is a teacher
     const teacher = await User.findById(teacherId);
@@ -18,42 +34,49 @@ exports.allocateCourse = async (req, res) => {
       });
     }
 
-    // Check if course exists
-    const course = await Course.findById(courseId);
-    if (!course) {
+    // Validate courses exist
+    const courses = await Course.find({ _id: { $in: courseIds } }).select('_id');
+    const existingCourseIds = new Set(courses.map((c) => c._id.toString()));
+    const missingCourseIds = courseIds.filter((id) => !existingCourseIds.has(id.toString()));
+    if (missingCourseIds.length > 0) {
       return res.status(404).json({
         success: false,
-        message: 'Course not found'
+        message: `Course not found: ${missingCourseIds.join(', ')}`
       });
     }
 
-    // Check if already allocated
-    const existingAllocation = await Allocation.findOne({
+    // Find already-allocated for this teacher among selected courses
+    const existingAllocations = await Allocation.find({
       teacherId,
-      courseId,
+      courseId: { $in: courseIds },
       status: 'allocated'
-    });
+    }).select('courseId');
+    const alreadyAllocated = new Set(existingAllocations.map((a) => a.courseId.toString()));
 
-    if (existingAllocation) {
+    const toCreate = courseIds.filter((id) => !alreadyAllocated.has(id.toString()));
+    if (toCreate.length === 0) {
       return res.status(400).json({
         success: false,
-        message: 'Course already allocated to this teacher'
+        message: 'Selected course(s) already allocated to this teacher'
       });
     }
 
-    // Create allocation
-    const allocation = await Allocation.create({
-      teacherId,
-      courseId,
-      status: 'allocated'
-    });
+    const createdAllocations = await Allocation.insertMany(
+      toCreate.map((courseId) => ({ teacherId, courseId, status: 'allocated' })),
+      { ordered: false }
+    );
 
-    await allocation.populate('teacherId', 'name email registrationNo');
-    await allocation.populate('courseId', 'courseId courseName courseCode');
+    // Populate for response
+    const populated = await Allocation.find({ _id: { $in: createdAllocations.map((a) => a._id) } })
+      .populate('teacherId', 'name email registrationNo')
+      .populate('courseId', 'courseId courseName courseCode credits semester program')
+      .sort({ createdAt: -1 });
 
     res.status(201).json({
       success: true,
-      allocation
+      createdCount: populated.length,
+      skippedAlreadyAllocatedCount: alreadyAllocated.size,
+      allocations: populated
     });
   } catch (error) {
     res.status(500).json({

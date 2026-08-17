@@ -30,7 +30,7 @@ const courseSchema = new mongoose.Schema({
     type: Number,
     required: true,
     min: 1,
-    max: 8
+    max: 12
   },
   program: {
     type: String,

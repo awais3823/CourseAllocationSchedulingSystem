@@ -1,13 +1,21 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
+import ScheduliXLogo from '../components/ScheduliXLogo';
+import { SEMESTER_OPTIONS } from '../constants';
 import './Auth.css';
+
+const DEGREE_LEVEL_OPTIONS = [
+  { value: 'BS', label: 'BS (Bachelor of Science)' },
+  { value: 'Master', label: 'Master' },
+  { value: 'MPhil', label: 'MPhil' }
+];
 
 const Signup = () => {
   const [formData, setFormData] = useState({
-    registrationNo: '',
     email: '',
     password: '',
+    confirmPassword: '',
     name: '',
     semester: '',
     program: '',
@@ -17,7 +25,9 @@ const Signup = () => {
   const [success, setSuccess] = useState('');
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [passwordStrength, setPasswordStrength] = useState({ score: 0, feedback: [] });
+  const [passwordMatch, setPasswordMatch] = useState(true);
 
   // Password strength checker
   const checkPasswordStrength = (password) => {
@@ -63,6 +73,15 @@ const Signup = () => {
     // Check password strength in real-time
     if (name === 'password') {
       setPasswordStrength(checkPasswordStrength(value));
+      // Check if passwords match when password changes
+      if (formData.confirmPassword) {
+        setPasswordMatch(value === formData.confirmPassword);
+      }
+    }
+    
+    // Check if passwords match when confirm password changes
+    if (name === 'confirmPassword') {
+      setPasswordMatch(value === formData.password);
     }
   };
 
@@ -70,6 +89,13 @@ const Signup = () => {
     e.preventDefault();
     setError('');
     setSuccess('');
+    
+    // Validate password match
+    if (formData.password !== formData.confirmPassword) {
+      setError('Passwords do not match. Please try again.');
+      setPasswordMatch(false);
+      return;
+    }
     
     // Validate password strength before submitting
     if (passwordStrength.score < 3) {
@@ -80,7 +106,6 @@ const Signup = () => {
     setLoading(true);
 
     const userData = {
-      registrationNo: formData.registrationNo,
       email: formData.email,
       password: formData.password,
       name: formData.name,
@@ -107,56 +132,55 @@ const Signup = () => {
 
   return (
     <div className="auth-container">
-      <div className="auth-card">
-        <h2>Sign Up</h2>
+      <div className="auth-card signup-card">
+        <div className="auth-brand">
+          <ScheduliXLogo theme="onLight" size="default" />
+        </div>
+        <h2>Create Account</h2>
         {error && <div className="alert alert-error">{error}</div>}
         {success && <div className="alert alert-success">{success}</div>}
         
         <form onSubmit={handleSubmit}>
+          <div className="signup-grid">
           <div className="form-group">
-            <label>Registration Number</label>
+            <label htmlFor="name">Full Name</label>
             <input
               type="text"
-              name="registrationNo"
-              value={formData.registrationNo}
-              onChange={handleChange}
-              required
-            />
-          </div>
-          
-          <div className="form-group">
-            <label>Name</label>
-            <input
-              type="text"
+              id="name"
               name="name"
               value={formData.name}
               onChange={handleChange}
               required
+              placeholder="Enter your full name"
             />
           </div>
           
-          <div className="form-group">
-            <label>Email</label>
+          <div className="form-group signup-full">
+            <label htmlFor="email">Email Address</label>
             <input
               type="email"
+              id="email"
               name="email"
               value={formData.email}
               onChange={handleChange}
               required
+              placeholder="Enter your email address"
             />
           </div>
           
-          <div className="form-group">
-            <label>Password</label>
+          <div className="form-group signup-half">
+            <label htmlFor="password">Password</label>
             <div className="password-input-wrapper">
               <input
                 type={showPassword ? "text" : "password"}
+                id="password"
                 name="password"
                 value={formData.password}
                 onChange={handleChange}
                 required
                 minLength="8"
                 autoComplete="new-password"
+                placeholder="Create a strong password"
                 data-1p-ignore
               />
               <button
@@ -210,23 +234,93 @@ const Signup = () => {
             )}
           </div>
           
-          <div className="form-group">
-            <label>Semester <small>(Required if you are a student)</small></label>
-            <input
-              type="number"
-              name="semester"
-              value={formData.semester}
-              onChange={handleChange}
-              min="1"
-              max="8"
-              placeholder="Enter semester (1-8) if you are a student"
-            />
+          <div className="form-group signup-half">
+            <label htmlFor="confirmPassword">Confirm Password</label>
+            <div className="password-input-wrapper">
+              <input
+                type={showConfirmPassword ? "text" : "password"}
+                id="confirmPassword"
+                name="confirmPassword"
+                value={formData.confirmPassword}
+                onChange={handleChange}
+                required
+                autoComplete="new-password"
+                placeholder="Re-enter your password"
+                data-1p-ignore
+                className={!passwordMatch && formData.confirmPassword ? 'input-error' : ''}
+              />
+              <button
+                type="button"
+                className="password-toggle"
+                onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                aria-label={showConfirmPassword ? "Hide password" : "Show password"}
+              >
+                {showConfirmPassword ? (
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path>
+                    <line x1="1" y1="1" x2="23" y2="23"></line>
+                  </svg>
+                ) : (
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+                    <circle cx="12" cy="12" r="3"></circle>
+                  </svg>
+                )}
+              </button>
+            </div>
+            {!passwordMatch && formData.confirmPassword && (
+              <small className="error-message">Passwords do not match</small>
+            )}
+            {passwordMatch && formData.confirmPassword && formData.password === formData.confirmPassword && (
+              <small className="success-message">✓ Passwords match</small>
+            )}
           </div>
           
-          <div className="form-group">
-            <label>Program <small>(Required if you are a student)</small></label>
+          <div className="form-group signup-half">
+            <label htmlFor="degreeLevel">Degree Level <small>(students only)</small></label>
+            <div className="auth-select-wrapper">
+              <select
+                id="degreeLevel"
+                name="degreeLevel"
+                className={`auth-select ${!formData.degreeLevel ? 'auth-select--placeholder' : ''}`}
+                value={formData.degreeLevel}
+                onChange={handleChange}
+              >
+                <option value="">Select degree level</option>
+                {DEGREE_LEVEL_OPTIONS.map((opt) => (
+                  <option key={opt.value} value={opt.value}>
+                    {opt.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          <div className="form-group signup-half">
+            <label htmlFor="semester">Semester <small>(students only)</small></label>
+            <div className="auth-select-wrapper">
+              <select
+                id="semester"
+                name="semester"
+                className={`auth-select ${!formData.semester ? 'auth-select--placeholder' : ''}`}
+                value={formData.semester}
+                onChange={handleChange}
+              >
+                <option value="">Select semester</option>
+                {SEMESTER_OPTIONS.map((sem) => (
+                  <option key={sem} value={sem}>
+                    Semester {sem}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          <div className="form-group signup-full">
+            <label htmlFor="program">Program <small>(students only)</small></label>
             <input
               type="text"
+              id="program"
               name="program"
               value={formData.program}
               onChange={handleChange}
@@ -234,21 +328,9 @@ const Signup = () => {
             />
           </div>
 
-          <div className="form-group">
-            <label>Degree Level <small>(Required if you are a student)</small></label>
-            <select
-              name="degreeLevel"
-              value={formData.degreeLevel}
-              onChange={handleChange}
-            >
-              <option value="">Select degree level</option>
-              <option value="BS">BS (Bachelor of Science)</option>
-              <option value="Master">Master</option>
-              <option value="MPhil">MPhil</option>
-            </select>
-          </div>
+          </div>{/* end signup-grid */}
 
-          <div className="alert alert-info" style={{ marginBottom: '20px', fontSize: '13px' }}>
+          <div className="alert alert-info signup-note">
             <strong>Note:</strong> You must be pre-registered by an administrator to sign up. 
             Your role will be automatically assigned based on your registration.
           </div>

@@ -1,0 +1,78 @@
+.schedulix-logo {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  text-decoration: none;
+  color: inherit;
+  line-height: 1;
+}
+
+.schedulix-logo--compact {
+  gap: 8px;
+}
+
+.schedulix-logo--compact .schedulix-logo__svg {
+  width: 30px;
+  height: 30px;
+}
+
+.schedulix-logo--hero .schedulix-logo__svg {
+  width: 44px;
+  height: 44px;
+}
+
+.schedulix-logo--hero .schedulix-logo__text {
+  font-size: 1.35rem;
+}
+
+.schedulix-logo__mark {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.schedulix-logo__svg {
+  display: block;
+  width: 36px;
+  height: 36px;
+}
+
+.schedulix-logo__text {
+  font-weight: 700;
+  font-size: 1.2rem;
+  letter-spacing: -0.04em;
+  white-space: nowrap;
+}
+
+.schedulix-logo--compact .schedulix-logo__text {
+  font-size: 1.05rem;
+}
+
+.schedulix-logo--onDark .schedulix-logo__scheduli {
+  color: #ffffff;
+}
+
+.schedulix-logo--onLight .schedulix-logo__scheduli {
+  color: #0f172a;
+}
+
+.schedulix-logo__x {
+  font-weight: 800;
+}
+
+.schedulix-logo__x--onDark {
+  color: #7dd3fc;
+}
+
+.schedulix-logo__x--onLight {
+  color: #0d9488;
+}
+
+.schedulix-logo:hover .schedulix-logo__x--onDark {
+  color: #bae6fd;
+}
+
+.schedulix-logo:hover .schedulix-logo__scheduli {
+  opacity: 0.95;
+}
