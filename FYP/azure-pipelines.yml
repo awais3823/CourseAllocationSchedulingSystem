@@ -9,6 +9,10 @@ variables:
   dockerfilePathBackend: '$(Build.SourcesDirectory)/backend/Dockerfile'
   dockerfilePathFrontend: '$(Build.SourcesDirectory)/frontend/Dockerfile'
   tag: '$(Build.BuildId)'
+  ACR_NAME: 'schedulixregistry'
+  ACR_LOGIN_SERVER: 'schedulixregistry.azurecr.io'
+  BACKEND_APP_SERVICE_NAME: 'schedulix-backend'
+  FRONTEND_APP_SERVICE_NAME: 'schedulix-frontend'
 
 stages:
 - stage: BuildAndPush
@@ -25,7 +29,7 @@ stages:
         command: buildAndPush
         repository: $(imageRepositoryBackend)
         dockerfile: $(dockerfilePathBackend)
-        containerRegistry: $(ACR_SERVICE_CONNECTION)
+        containerRegistry: 'ACR Service Connection'
         tags: |
           $(tag)
           latest
@@ -41,7 +45,7 @@ stages:
         command: buildAndPush
         repository: $(imageRepositoryFrontend)
         dockerfile: $(dockerfilePathFrontend)
-        containerRegistry: $(ACR_SERVICE_CONNECTION)
+        containerRegistry: 'ACR Service Connection'
         tags: |
           $(tag)
           latest
@@ -63,9 +67,9 @@ stages:
           - task: AzureWebAppContainer@1
             displayName: Deploy backend container
             inputs:
-              azureSubscription: $(AZURE_SERVICE_CONNECTION)
+              azureSubscription: 'Azure Service Connection'
               appName: $(BACKEND_APP_SERVICE_NAME)
-              imageName: '$(ACR_NAME).azurecr.io/$(imageRepositoryBackend):$(tag)'
+              imageName: '$(ACR_LOGIN_SERVER)/$(imageRepositoryBackend):$(tag)'
               containerCommand: ''
 
 - stage: DeployFrontend
@@ -85,7 +89,7 @@ stages:
           - task: AzureWebAppContainer@1
             displayName: Deploy frontend container
             inputs:
-              azureSubscription: $(AZURE_SERVICE_CONNECTION)
+              azureSubscription: 'Azure Service Connection'
               appName: $(FRONTEND_APP_SERVICE_NAME)
-              imageName: '$(ACR_NAME).azurecr.io/$(imageRepositoryFrontend):$(tag)'
+              imageName: '$(ACR_LOGIN_SERVER)/$(imageRepositoryFrontend):$(tag)'
               containerCommand: ''
