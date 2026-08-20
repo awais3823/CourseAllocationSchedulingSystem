@@ -6,8 +6,8 @@ trigger:
 variables:
   imageRepositoryBackend: 'schedulix-backend'
   imageRepositoryFrontend: 'schedulix-frontend'
-  dockerfilePathBackend: '$(Build.SourcesDirectory)/backend/Dockerfile'
-  dockerfilePathFrontend: '$(Build.SourcesDirectory)/frontend/Dockerfile'
+  dockerfilePathBackend: '$(Build.SourcesDirectory)/FYP/backend/Dockerfile'
+  dockerfilePathFrontend: '$(Build.SourcesDirectory)/FYP/frontend/Dockerfile'
   tag: '$(Build.BuildId)'
   ACR_NAME: 'schedulixregistry'
   ACR_LOGIN_SERVER: 'schedulixregistry.azurecr.io'
